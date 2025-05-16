@@ -9,3 +9,6 @@
 - **vendor**: cập nhật version cho các dependencies, packages.
 
 # Chia branch làm việc
+- Mỗi người sẽ tự tạo một branch riêng từ branch `main` để làm việc, không commit trực tiếp vào branch chính (main).
+- Cần tạo pull request để merge branch của mình vào branch chính (main).
+
