@@ -1,4 +1,8 @@
 # Commit message format
+```
+<type>[optional scope]: <description>
+```
+
 - **feat**: thêm một feature
 - **fix**: fix bug cho hệ thống, vá lỗi trong codebase
 - **refactor**: sửa code nhưng không fix bug cũng không thêm feature hoặc đôi khi bug cũng được fix từ việc refactor.
