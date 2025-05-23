@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Socket.IO Test</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  </head>
+  <body>
+    <h1>Socket.IO Test Page</h1>
+    <script>
+      const socket = io();
+      socket.on('connect', () => {
+        console.log('Connected to server');
+      });
+    </script>
+  </body>
+</html>
