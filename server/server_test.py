@@ -25,8 +25,10 @@ def connect(sid, environ):
 
 @sio.event
 def chat_message(sid, data):
-    print('Message received:', data)
-    sio.emit('incoming_message', {'message': data['message']})
+    print("Message received:", data)
+    message = data.get('message', '')
+    sender = data.get('sender', 'Anonymous')
+    sio.emit('incoming_message', {'message': message, 'sender': sender})
 
 @sio.event
 def disconnect(sid):

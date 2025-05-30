@@ -3,6 +3,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from datetime import datetime
 from emoji_dict import EMOJI_DICT
+import threading
+import socketio
 
 class ChatClientGUI:
     def __init__(self, root, username="Guest"):
@@ -13,6 +15,37 @@ class ChatClientGUI:
         self.username = username
         self.emoji_window = None
         self.setup_gui()
+
+        self.sio = socketio.Client()
+        self.setup_socketio()
+        self.connect_to_server()
+
+    def setup_socketio(self):
+        @self.sio.event
+        def connect():
+            self.display_system_message("Connected to chat server.")
+
+        @self.sio.event
+        def disconnect():
+            self.display_system_message("Disconnected from server.")
+
+        @self.sio.event
+        def incoming_message(data):
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            sender = data.get("sender", "Unknown")
+            message = data.get("message", "")
+            self.display_message("Global", sender, message, timestamp)
+
+    def connect_to_server(self):
+        def connect():
+            try:
+                self.sio.connect("http://localhost:8080")
+                self.sio.wait()
+            except Exception as e:
+                self.display_system_message(f"Connection failed: {e}")
+
+        threading.Thread(target=connect, daemon=True).start()
+
 
     def setup_gui(self):
         # Configure grid weights for resizing
@@ -109,7 +142,6 @@ class ChatClientGUI:
         self.suggestion_label.grid_remove()
         # Exit protocol
         self.root.protocol("WM_DELETE_WINDOW", self.graceful_exit)
-
 
     def show_emoji_picker(self):
         """Create and show the emoji picker window"""
@@ -292,10 +324,6 @@ class ChatClientGUI:
         except Exception as e:
             print(f"Error inserting emoji: {e}")
 
-    # def insert_emoji(self):
-    #     emoji_code = ":smile:"
-    #     self.entry_var.set(self.entry_var.get() + " " + emoji_code)
-
     def select_file(self):
         filepath = filedialog.askopenfilename()
         if filepath:
@@ -312,7 +340,6 @@ class ChatClientGUI:
         elif not current_text.startswith('/'):
             self.suggestion_label.grid_remove()
         
-
     def send_message(self):
         raw_msg = self.entry_var.get()
         if raw_msg.strip() == "":
@@ -342,7 +369,11 @@ class ChatClientGUI:
             msg_type = "Global"
             formatted_msg = raw_msg
 
-        self.display_message(msg_type, self.username, formatted_msg, timestamp)
+        # self.display_message(msg_type, self.username, formatted_msg, timestamp)
+        self.sio.emit('chat_message', {
+            'message': formatted_msg,
+            'sender': self.username
+        })
         self.entry_var.set("")
 
     def display_message(self, msg_type, sender, message, timestamp):
@@ -369,9 +400,11 @@ class ChatClientGUI:
             self.user_list.insert(tk.END, f"● {user}")
 
     def graceful_exit(self):
-        # TODO: send disconnect message to server
+        try:
+            self.sio.disconnect()
+        except:
+            pass
         self.root.destroy()
-
 
 if __name__ == "__main__":
     root = tk.Tk()
