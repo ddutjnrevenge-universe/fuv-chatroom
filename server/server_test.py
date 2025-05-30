@@ -1,31 +1,36 @@
-from aiohttp import web
+from flask import Flask, render_template_string
 import socketio
 
-sio = socketio.AsyncServer()
-app = web.Application()
-sio.attach(app)
+sio = socketio.Server()
+app = Flask(__name__)
+app.wsgi_app = socketio.WSGIApp(sio, app.wsgi_app)
 
-async def index(request):
-    """Serve the client-side application."""
-    with open('index.html') as f:
-        return web.Response(text=f.read(), content_type='text/html')
+INDEX_HTML = '''
+<!DOCTYPE html>
+<html>
+  <head><title>Chat</title></head>
+  <body>
+    <h1>Simple Chat Server</h1>
+  </body>
+</html>
+'''
+
+@app.route('/')
+def index():
+    return render_template_string(INDEX_HTML)
 
 @sio.event
 def connect(sid, environ):
-    print("connect ", sid)
+    print('Client connected:', sid)
 
 @sio.event
-async def chat_message(sid, data):
-    print("message ", data)
-    new_data = {'message': data['message']}
-    await sio.emit('incoming_message', new_data)
+def chat_message(sid, data):
+    print('Message received:', data)
+    sio.emit('incoming_message', {'message': data['message']})
 
 @sio.event
 def disconnect(sid):
-    print('disconnect ', sid)
-
-app.router.add_static('/static', 'static')
-app.router.add_get('/', index)
+    print('Client disconnected:', sid)
 
 if __name__ == '__main__':
-    web.run_app(app)
+    app.run(port=8080)

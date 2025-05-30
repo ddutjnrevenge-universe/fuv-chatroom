@@ -1,49 +1,33 @@
-import asyncio
 import socketio
-import sys
 
-sio = socketio.AsyncClient()
-
-@sio.event
-async def connect():
-    print('connection established')
+sio = socketio.Client()
 
 @sio.event
-async def incoming_message(data):
-    print('message received: ', data['message'])
-    # await sio.emit('my response', {'response': 'my response'})
+def connect():
+    print("Connected to server")
 
 @sio.event
-async def disconnect():
-    print('disconnected from server')
+def incoming_message(data):
+    print("Message received:", data['message'])
 
-async def send_messages():
-    # Async input loop to send messages from terminal
-    print("Type your messages below. Type 'quit' to exit.")
-    loop = asyncio.get_running_loop()
-    while True:
-        # Run the blocking input() call in a separate thread to not block event loop
-        message = await loop.run_in_executor(None, sys.stdin.readline)
-        message = message.strip()
-        if message.lower() == 'quit':
-            print("Quitting...")
-            await sio.disconnect()
-            break
-        if message:
-            await sio.emit('chat_message', {'message': message})
+@sio.event
+def disconnect():
+    print("Disconnected from server")
 
-async def main():
+def main():
     try:
-        await sio.connect('http://localhost:8080', wait_timeout=10)
-        print("Connected successfully")
-
-        # Start the send_messages coroutine concurrently with sio.wait()
-        await asyncio.gather(
-            send_messages(),
-            sio.wait()
-        )
+        sio.connect('http://localhost:8080')
+        print("Connected. Type 'quit' to exit.")
+        while True:
+            message = input("You: ").strip()
+            if message.lower() == 'quit':
+                break
+            if message:
+                sio.emit('chat_message', {'message': message})
     except Exception as e:
-        print(f"Connection error: {e}")
+        print("Connection error:", e)
+    finally:
+        sio.disconnect()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
