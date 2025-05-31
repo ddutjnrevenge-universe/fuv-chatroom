@@ -24,7 +24,7 @@ def setup_window(window, title):
     center_window(window, W_WIDTH, W_HEIGHT)
 
 class ClientGUI:
-    def __init__ (self, ):
+    def __init__ (self):
         self.Window = tk.Tk()
         self.Window.withdraw()
         
