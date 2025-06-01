@@ -76,11 +76,18 @@ class ChatClientGUI:
             self.display_system_message("Disconnected from server.")
 
         @self.sio.event
-        def incoming_message(data):
+        def incoming_global_message(data):
             timestamp = datetime.now().strftime("%H:%M:%S")
             sender = data.get("sender", "Unknown")
             message = data.get("message", "")
             self.display_message("Global", sender, message, timestamp)
+
+        @self.sio.event
+        def incoming_private_message(data):
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            sender = data.get("sender", "Unknown")
+            message = data.get("message", "")
+            self.display_message('private', sender, message, timestamp)
 
     def connect_to_server(self):
         def connect():
@@ -457,6 +464,12 @@ class ChatClientGUI:
                 message_content = parts[2]
                 # Format the displayed message without the /w command
                 formatted_msg = f"(To: {recipient}) {message_content}"
+
+                self.sio.emit('private_message', {
+                    'recipient': recipient,
+                    'message': message_content,
+                    'sender': self.username
+                })
             else:
                 # Show error for invalid format
                 self.display_system_message("Invalid private message format. Use '/w username message'")
@@ -466,7 +479,7 @@ class ChatClientGUI:
             formatted_msg = raw_msg
 
             # self.display_message(msg_type, self.username, formatted_msg, timestamp)
-            self.sio.emit('chat_message', {
+            self.sio.emit('global_message', {
                 'message': formatted_msg,
                 'sender': self.username
             })
