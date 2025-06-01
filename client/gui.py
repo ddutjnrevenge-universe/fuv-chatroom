@@ -1,116 +1,131 @@
-# -*- coding: utf-8 -*-
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from datetime import datetime
+import socket
+import threading
+import json
+import sys
+import os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from shared.constants import HOST, PORT, BUFFER_SIZE
 from emoji_dict import EMOJI_DICT
 
-class ChatClientGUI:
-    def __init__(self, root, username="Guest"):
-        self.root = root
-        self.root.title("FUV Chatroom")
-        self.root.minsize(900, 600)  # Set a larger minimum window size
+def center_window(window, width, height):
+    screen_width = window.winfo_screenwidth()
+    screen_height = window.winfo_screenheight()
+    x = (screen_width // 2) - (width // 2)
+    y = (screen_height // 2) - (height // 2)
+    window.geometry(f'{width}x{height}+{x}+{y - 10}')
 
-        self.username = username
+def setup_window(window, title, width, height):
+    window.title(title)
+    window.resizable(False, False)
+    window.configure(width=width, height=height)
+    center_window(window, width, height)
+
+class ChatClientGUI:
+    def __init__(self):
+        # self.root = root
+        # self.username = None
+        # self.client_socket = None
+        # self.emoji_window = None
+
+        # self.prompt_username()
+        # self.setup_gui()
+        self.root = tk.Tk()
+        self.root.withdraw()  # Hide main window until login
         self.emoji_window = None
+        self.username = None
+        self.client_socket = None
+        self.send_file = False
+        self.login_screen()
+        self.root.mainloop()
+
+    def login_screen(self):
+        self.login = tk.Toplevel()
+        setup_window(self.login, "FUV Chatroom Login", 600, 400)
+
+        tk.Label(self.login, text="Login", font=("Arial", 20, "bold")).place(relx=0.5, rely=0.2, anchor="center")
+
+        tk.Label(self.login, text="Username:", font=("Arial", 14, "bold")).place(relx=0.15, rely=0.3)
+
+        self.entry_username = tk.Entry(self.login, font=("Arial", 14))
+        self.entry_username.place(relwidth=0.45, relheight=0.08, relx=0.35, rely=0.294)
+
+        self.entry_username.bind("<Return>", lambda event: self.goto_chatroom(self.entry_username.get()))
+        tk.Button(self.login, text="→", font=("Arial", 14), command=lambda: self.goto_chatroom(self.entry_username.get())).place(relx=0.5, rely=0.5, anchor="center")
+
+        self.login.protocol("WM_DELETE_WINDOW", self.graceful_exit)
+
+    def goto_chatroom(self, username):
+        if username.strip() == "":
+            messagebox.showwarning("Warning", "Please input a username")
+            return
+        elif len(username.strip()) > 12:
+            messagebox.showwarning("Warning", "Username too long")
+            return
+
+        self.username = username.strip()
+        self.login.destroy()
         self.setup_gui()
+        self.root.deiconify()
+        self.root.title(f"FUV Chatroom - {self.username}")
+        self.connect_to_server()
+
+    def connect_to_server(self):
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self.client_socket.connect((HOST, PORT))
+            self.client_socket.send(self.username.encode())
+            threading.Thread(target=self.receive_messages, daemon=True).start()
+        except Exception as e:
+            messagebox.showerror("Connection Error", f"Could not connect to server: {e}")
 
     def setup_gui(self):
-        # Configure grid weights for resizing
+        self.root.title("FUV Chatroom")
+        self.root.minsize(900, 600)
+
         self.root.grid_rowconfigure(1, weight=1)
         self.root.grid_columnconfigure(0, weight=3)
-        self.root.grid_columnconfigure(1, weight=0)
         self.root.grid_columnconfigure(2, weight=1)
 
-        # Top layout
         self.chat_label = tk.Label(self.root, text="FUV Chatroom", bg="midnight blue", fg="white", font=("Arial", 20, "bold"))
         self.chat_label.grid(row=0, column=0, columnspan=2, sticky="ew")
 
         self.user_label = tk.Label(self.root, text="Active", bg="midnight blue", fg="white", font=("Arial", 16))
         self.user_label.grid(row=0, column=2, sticky="ew")
 
-        # Chat box
-        # self.chat_box = scrolledtext.ScrolledText(self.root, width=80, height=28, state="disabled", font=("Arial", 14))
-        self.chat_box = scrolledtext.ScrolledText(
-                        self.root, 
-                        width=80, 
-                        height=28, 
-                        state="disabled", 
-                        font=("Arial", 14)  
-                    )
+        self.chat_box = scrolledtext.ScrolledText(self.root, width=80, height=28, state="disabled", font=("Arial", 14))
         self.chat_box.grid(row=1, column=0, columnspan=2, padx=10, pady=5, sticky="nsew")
 
-        # Active user list
         self.user_list = tk.Listbox(self.root, width=28, height=28, font=("Arial", 14))
         self.user_list.grid(row=1, column=2, padx=5, pady=5, sticky="nsew")
 
-        # Entry box
-        self.entry_var = tk.StringVar()
-        # self.entry_box = tk.Entry(self.root, textvariable=self.entry_var, width=75, font=("Arial", 14))
-        self.entry_box = tk.Entry(
-                        self.root, 
-                        textvariable=self.entry_var, 
-                        width=75, 
-                        font=("Arial", 14)  
-                    )
-        self.entry_box.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
-        # Add this binding after creating the entry box
-        self.entry_box.bind("<KeyRelease>", self.check_for_slash_command)
-        
-        # Create a suggestion label (initially hidden)
-        self.suggestion_label = tk.Label(
-            self.root, 
-            text="Tip: Type '/w username message' to send a private message",
-            fg="gray",
-            font=("Arial", 10, "italic")
-        )
-        self.suggestion_label.grid(row=3, column=0, sticky="w", padx=10, pady=2)
-        self.suggestion_label.grid_remove()  # Hide initially
-
-        # Send button
-        self.send_btn = tk.Button(self.root, text="➤", bg="DarkGoldenrod1", font=("Arial", 16), command=self.send_message)
-        self.send_btn.grid(row=2, column=1, sticky="w")
-
-        # Bind Enter key to send message
-        self.entry_box.bind("<Return>", lambda event: self.send_message())
-
-        # # File and Emoji Buttons
-        # self.file_btn = tk.Button(self.root, text="📎", font=("Arial", 16), command=self.select_file)
-        # self.file_btn.grid(row=3, column=0, sticky="w", padx=10)
-
-        # self.emoji_btn = tk.Button(self.root, text="😊", font=("Arial", 16), command=self.insert_emoji)
-        # self.emoji_btn.grid(row=3, column=0, sticky="w", padx=60)
-        # Bottom button layout - create a frame to contain the buttons
         button_frame = tk.Frame(self.root)
         button_frame.grid(row=3, column=0, columnspan=2, sticky="w", padx=10, pady=5)
 
-        # # File and Emoji Buttons
-        # self.file_btn = tk.Button(self.root, text="📎", font=("Arial", 16), command=self.select_file)
-        # self.file_btn.grid(row=3, column=0, sticky="w", padx=10)
-
-        # # Change emoji button to open picker
-        # self.emoji_btn = tk.Button(self.root, text="😊", font=("Arial", 16), command=self.show_emoji_picker)
-        # self.emoji_btn.grid(row=3, column=0, sticky="w", padx=60)
-
-        # File and Emoji Buttons - now inside the button frame
         self.file_btn = tk.Button(button_frame, text="📎", font=("Arial", 16), command=self.select_file)
         self.file_btn.pack(side="left", padx=(0, 10))  # Right padding of 10
 
         self.emoji_btn = tk.Button(button_frame, text="😊", font=("Arial", 16), command=self.show_emoji_picker)
         self.emoji_btn.pack(side="left")
 
-        # Suggestion label - moved to row 4 and spans both columns
-        self.suggestion_label = tk.Label(
-            self.root,
-            text="Tip: Type '/p [username] [message]' to send a private message",
-            fg="#2E86C1",
-            font=("Arial", 10, "italic")
-        )
+        # Suggestion label below the two buttons
+        self.suggestion_label = tk.Label(self.root, text="Tip: Use '/w [username] [message]' for private message", fg="gray", font=("Arial", 10, "italic"))
         self.suggestion_label.grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 5))
         self.suggestion_label.grid_remove()
-        # Exit protocol
+
+        self.entry_var = tk.StringVar()
+        self.entry_box = tk.Entry(self.root, textvariable=self.entry_var, font=("Arial", 14))
+        self.entry_box.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+        self.entry_box.bind("<Return>", lambda event: self.send_message())
+        self.entry_box.bind("<KeyRelease>", self.check_for_slash_command)
+
+        self.send_btn = tk.Button(self.root, text="➤", bg="DarkGoldenrod1", font=("Arial", 16), command=self.send_message)
+        self.send_btn.grid(row=2, column=1, sticky="w")
+
         self.root.protocol("WM_DELETE_WINDOW", self.graceful_exit)
-
-
     def show_emoji_picker(self):
         """Create and show the emoji picker window"""
         if self.emoji_window and self.emoji_window.winfo_exists():
@@ -292,63 +307,87 @@ class ChatClientGUI:
         except Exception as e:
             print(f"Error inserting emoji: {e}")
 
-    # def insert_emoji(self):
-    #     emoji_code = ":smile:"
-    #     self.entry_var.set(self.entry_var.get() + " " + emoji_code)
-
     def select_file(self):
         filepath = filedialog.askopenfilename()
+        
+        accept_extension = ["mp4", "jpeg", "jpg", "mp3", "png"]
+        
         if filepath:
-            self.display_system_message(f"Selected file: {filepath.split('/')[-1]}")
-            # You would later send this file to the server
+            f_size_bytes = os.path.getsize(filepath)
+            f_size_mb = f_size_bytes / (1024*1024)
+            
+            extension = os.path.splitext(filepath)[1]
+            extension = extension[1:].lower()
 
-    def check_for_slash_command(self, event):
-        """Check if user typed '/' and show suggestion"""
-        current_text = self.entry_var.get()
-        
-        # Show suggestion if user types '/' at start of message
-        if current_text.startswith('/') and len(current_text) == 1:
-            self.suggestion_label.grid()
-        elif not current_text.startswith('/'):
-            self.suggestion_label.grid_remove()
-        
+            if extension in accept_extension:
+                if f_size_mb <= 25:
+                    self.send_file = True
+                    self.display_system_message(f"Selected file: {filepath.split('/')[-1]}")
+                    # You would later send this file to the server
+                else:
+                    messagebox.showwarning("Warning", "Please choose a file smaller than 25 MB.")
+            else:
+                messagebox.showwarning("Warning", "Inappropriate file type (not video, image, or audio)")
+                
+    def receive_messages(self):
+        while True:
+            try:
+                msg = self.client_socket.recv(BUFFER_SIZE).decode()
+                if msg == "__USERNAME_TAKEN__":
+                    messagebox.showerror("Username Error", "This username is already taken. Please try another username.")
+                    self.client_socket.close()
+                    self.root.withdraw()
+                    self.login_screen()
+                    break
+                elif msg.startswith("__USER_LIST__:"):
+                    users = json.loads(msg.split(":", 1)[1])
+                    self.update_user_list(users)
+                elif msg.startswith("(Private)"):
+                    # Extract sender from the message using format: (Private) (sender): content
+                    parts = msg.split(")", 2)
+                    sender_info = parts[1].strip(" ()")
+                    content = parts[2].strip()
+                    sender = "You" if sender_info.startswith(self.username) else sender_info
+                    self.display_message("Private", sender, f"{sender_info}: {content}")
+
+                elif msg.startswith("(Global)"):
+                    # Extract sender from the message using format: (Global) (sender): content
+                    parts = msg.split(")", 2)
+                    sender_info = parts[1].strip(" ()")
+                    content = parts[2].strip()
+                    if sender_info == self.username:
+                        sender = "You"
+                    else:
+                        sender = sender_info
+                    self.display_message("Global", sender, f"{sender_info}: {content}")
+                else:
+                    self.display_system_message(msg)
+            except Exception as e:
+                print(f"[ERROR] {e}")
+                break
 
     def send_message(self):
         raw_msg = self.entry_var.get()
         if raw_msg.strip() == "":
             return
 
-        # Replace emoji text with Unicode
         for code, emoji in EMOJI_DICT.items():
             raw_msg = raw_msg.replace(code, emoji)
 
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        
-        # Handle private messages (/w username message)
-        if raw_msg.startswith("/p "):
-            msg_type = "Private"
-            # Split the message into parts
-            parts = raw_msg.split(maxsplit=2)  # Split into ["/w", "username", "message"]
-            if len(parts) >= 3:
-                recipient = parts[1]
-                message_content = parts[2]
-                # Format the displayed message without the /w command
-                formatted_msg = f"(To: {recipient}) {message_content}"
-            else:
-                # Show error for invalid format
-                self.display_system_message("Invalid private message format. Use '/w username message'")
-                return
-        else:
-            msg_type = "Global"
-            formatted_msg = raw_msg
+        try:
+            self.client_socket.send(raw_msg.encode())
+        except Exception as e:
+            self.display_system_message(f"Failed to send message: {e}")
 
-        self.display_message(msg_type, self.username, formatted_msg, timestamp)
         self.entry_var.set("")
 
-    def display_message(self, msg_type, sender, message, timestamp):
+    def display_message(self, msg_type, sender, message):
         self.chat_box.config(state="normal")
         tag = "blue" if msg_type == "Global" else "orange"
-        formatted = f"({msg_type}) ({sender}) ({timestamp}): {message}\n"
+        timestamp = datetime.now().strftime("%H:%M:%S")
+
+        display_sender = "You" if sender == "You" else sender
+        formatted = f"({msg_type}) ({display_sender}) ({timestamp}){message.split(':', 1)[1]}\n"
         self.chat_box.insert(tk.END, formatted, tag)
         self.chat_box.tag_config("blue", foreground="blue")
         self.chat_box.tag_config("orange", foreground="darkorange")
@@ -357,7 +396,16 @@ class ChatClientGUI:
 
     def display_system_message(self, message):
         self.chat_box.config(state="normal")
-        formatted = f"(System) ({datetime.now().strftime('%H:%M:%S')}): {message}\n"
+
+        if self.send_file == True:
+            status = "(Sent)"
+        else:
+            status = ""
+        
+        print(status)
+
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        formatted = f"(System) ({timestamp}): {message}\n"
         self.chat_box.insert(tk.END, formatted, "gray")
         self.chat_box.tag_config("gray", foreground="gray")
         self.chat_box.config(state="disabled")
@@ -366,16 +414,26 @@ class ChatClientGUI:
     def update_user_list(self, user_list):
         self.user_list.delete(0, tk.END)
         for user in user_list:
-            self.user_list.insert(tk.END, f"● {user}")
+            prefix = "●"
+            self.user_list.insert(tk.END, f"{prefix} {user}")
+
+    def check_for_slash_command(self, event):
+        if self.entry_var.get().startswith("/"):
+            self.suggestion_label.grid()
+        else:
+            self.suggestion_label.grid_remove()
 
     def graceful_exit(self):
-        # TODO: send disconnect message to server
-        self.root.destroy()
-
+        if messagebox.askokcancel("Quit", "Do you want to quit?"):
+            try:
+                self.client_socket.close()
+            except:
+                pass
+            self.root.destroy()
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = ChatClientGUI(root, username="FUV-User-1")
-    # Example user list update
-    app.update_user_list(["FUV-User-1", "FUV-User-2", "FUV-User-3"])
-    root.mainloop()
+    # root = tk.Tk()
+    # app = ChatClientGUI(root)
+    # root.mainloop()
+    ChatClientGUI()
+    
