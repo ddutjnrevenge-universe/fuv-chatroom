@@ -5,8 +5,11 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from datetime import datetime
 from emoji_dict import EMOJI_DICT
+import threading
+import socketio
 
 FONT = "Helvetica"
+SERVER_API_URL = "http://localhost:8080"
 
 def center_window(window, width, height):
     screen_width = window.winfo_screenwidth()
@@ -29,10 +32,74 @@ class ChatClientGUI:
         self.emoji_window = None
         self.username = None
         self.send_file = False
-        self.active_users = ["th","FUV-User-1", "FUV-User-2", "FUV-User-3"]
+        self.active_users = []
+        
+        # setup the socket client
+        self.sio = socketio.Client()
+        self.setup_socketio()
+        # self.connect_to_server()
         
         self.login_screen()
         self.Window.mainloop()
+
+    def setup_socketio(self):
+        @self.sio.event
+        def connect():
+            self.display_system_message("Connected to chat server.")
+            self.sio.emit('user_joined', {'username': self.username})
+
+        # @self.sio.event
+        # def current_users(data):
+        #     users = data.get('users', [])
+        #     self.active_users = users
+        #     self.update_user_list(users)
+
+        @self.sio.event
+        def user_joined(data):
+            username = data.get("username", "Unknown")
+            users = data.get("users", [])
+            self.active_users = users
+            self.update_user_list(users[::-1]) 
+            if (self.username and username != self.username):
+                self.display_system_message(f"{username} has joined the chat.")
+
+        @self.sio.event
+        def user_left(data):
+            username = data.get("username", "Unknown")
+            users = data.get("users", [])
+            self.active_users = users
+            self.update_user_list(users[::-1])
+            self.display_system_message(f"{username} has left the chat.")
+
+        @self.sio.event
+        def disconnect():
+            self.display_system_message("Disconnected from server.")
+
+        @self.sio.event
+        def incoming_global_message(data):
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            sender = data.get("sender", "Unknown")
+            message = data.get("message", "")
+            self.display_message("Global", sender, message, timestamp)
+
+        @self.sio.event
+        def incoming_private_message(data):
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            sender = data.get("sender", "Unknown")
+            message = data.get("message", "")
+            self.display_message('private', sender, message, timestamp)
+
+    def connect_to_server(self):
+        def connect():
+            self.display_system_message("Connecting to server...")
+            try:
+                self.sio.connect(SERVER_API_URL)
+                self.sio.wait()
+            except Exception as e:
+                self.display_system_message(f"Connection failed: {e}")
+
+        threading.Thread(target=connect, daemon=True).start()
+        
 
     def login_screen(self):
         self.login = tk.Toplevel()
@@ -60,6 +127,7 @@ class ChatClientGUI:
         self.login.protocol("WM_DELETE_WINDOW", self.graceful_exit)
     
     def goto_chatroom(self, username):
+
         if username.strip() == "":
             # Dont allow an empty username
             messagebox.showwarning("Warning", "Please input an username")
@@ -76,8 +144,8 @@ class ChatClientGUI:
         self.login.destroy()
         self.chatroom_screen(username)
         
-        self.update_user_list(self.active_users[::-1])
-        self.active_users.append(username)
+        # self.active_users.append(username)
+        # self.update_user_list(self.active_users[::-1])
             
     def chatroom_screen(self, username):
         self.Window.deiconify()
@@ -136,23 +204,8 @@ class ChatClientGUI:
         # Bind Enter key to send message
         self.entry_box.bind("<Return>", lambda event: self.send_message())
 
-        # # File and Emoji Buttons
-        # self.file_btn = tk.Button(self.Window, text="📎", font=("Arial", 16), command=self.select_file)
-        # self.file_btn.grid(row=3, column=0, sticky="w", padx=10)
-
-        # self.emoji_btn = tk.Button(self.Window, text="😊", font=("Arial", 16), command=self.insert_emoji)
-        # self.emoji_btn.grid(row=3, column=0, sticky="w", padx=60)
-        # Bottom button layout - create a frame to contain the buttons
         button_frame = tk.Frame(self.Window)
         button_frame.grid(row=3, column=0, columnspan=2, sticky="w", padx=10, pady=5)
-
-        # # File and Emoji Buttons
-        # self.file_btn = tk.Button(self.Window, text="📎", font=("Arial", 16), command=self.select_file)
-        # self.file_btn.grid(row=3, column=0, sticky="w", padx=10)
-
-        # # Change emoji button to open picker
-        # self.emoji_btn = tk.Button(self.Window, text="😊", font=("Arial", 16), command=self.show_emoji_picker)
-        # self.emoji_btn.grid(row=3, column=0, sticky="w", padx=60)
 
         # File and Emoji Buttons - now inside the button frame
         self.file_btn = tk.Button(button_frame, text="📎", font=("Arial", 16), command=self.select_file)
@@ -171,6 +224,9 @@ class ChatClientGUI:
         self.suggestion_label.grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 5))
         self.suggestion_label.grid_remove()
         
+        ### Connect to the server
+        self.connect_to_server()
+
         # Exit protocol
         self.Window.protocol("WM_DELETE_WINDOW", self.graceful_exit)
 
@@ -408,6 +464,12 @@ class ChatClientGUI:
                 message_content = parts[2]
                 # Format the displayed message without the /w command
                 formatted_msg = f"(To: {recipient}) {message_content}"
+
+                self.sio.emit('private_message', {
+                    'recipient': recipient,
+                    'message': message_content,
+                    'sender': self.username
+                })
             else:
                 # Show error for invalid format
                 self.display_system_message("Invalid private message format. Use '/w username message'")
@@ -416,7 +478,12 @@ class ChatClientGUI:
             msg_type = "Global"
             formatted_msg = raw_msg
 
-        self.display_message(msg_type, self.username, formatted_msg, timestamp)
+            # self.display_message(msg_type, self.username, formatted_msg, timestamp)
+            self.sio.emit('global_message', {
+                'message': formatted_msg,
+                'sender': self.username
+            })
+
         self.entry_var.set("")
 
     def display_message(self, msg_type, sender, message, timestamp):
@@ -451,9 +518,14 @@ class ChatClientGUI:
             self.user_list.insert(tk.END, f"● {user}")
         
     def graceful_exit(self):
-        # TODO: send disconnect message to server
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
+            try:
+                if self.sio.connected:
+                    self.sio.emit('user_left', {'username': self.username})
+                self.sio.disconnect()
+            except:
+                pass
             self.Window.destroy()
-
+        
 if __name__ == "__main__":
     app = ChatClientGUI()
