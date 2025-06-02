@@ -1,2 +1,2 @@
 python-socketio[client]
-aiohttp
+requests
