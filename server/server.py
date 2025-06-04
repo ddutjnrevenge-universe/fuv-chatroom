@@ -45,7 +45,16 @@ def user_left(sid, data):
 
 @sio.event
 def disconnect(sid):
-    print('Client disconnected:', sid)
+    # print('Client disconnected:', sid)
+
+    for user in users:
+        if user['sid'] == sid:
+            username = user['username']
+            users.remove(user)
+            usernames = [user['username'] for user in users]
+            sio.emit('user_left', {'username': username, 'users': usernames})
+            print(f'User {username} disconnected with session ID {sid}')
+            break
 
 @sio.event
 def global_message(sid, data):
