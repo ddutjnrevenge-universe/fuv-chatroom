@@ -10,6 +10,8 @@ import socketio
 
 FONT = "Helvetica"
 SERVER_API_URL = "http://localhost:8080"
+is_connecting = False
+connection_failed = False
 
 def center_window(window, width, height):
     screen_width = window.winfo_screenwidth()
@@ -45,30 +47,34 @@ class ChatClientGUI:
     def setup_socketio(self):
         @self.sio.event
         def connect():
-            self.display_system_message("Connected to chat server.")
-            self.sio.emit('user_joined', {'username': self.username})
+            print("Connected to server.")
 
-        # @self.sio.event
-        # def current_users(data):
-        #     users = data.get('users', [])
-        #     self.active_users = users
-        #     self.update_user_list(users)
+        @self.sio.event
+        def current_users(data):
+            usernames = data.get('usernames', [])
+            print(f"Current usernames: {usernames}")
+            self.active_users = usernames
+            # self.update_user_list(users)
 
         @self.sio.event
         def user_joined(data):
             username = data.get("username", "Unknown")
-            users = data.get("users", [])
-            self.active_users = users
-            self.update_user_list(users[::-1]) 
-            if (self.username and username != self.username):
-                self.display_system_message(f"{username} has joined the chat.")
+            usernames = data.get("usernames", [])
+            self.active_users = usernames
+
+            # Check if chat_box exists
+            if not hasattr(self, 'chat_box') or self.chat_box is None: 
+                return
+            
+            self.display_system_message(f"{username} has joined the chat.")
+            self.update_user_list(usernames[::-1])
 
         @self.sio.event
         def user_left(data):
             username = data.get("username", "Unknown")
-            users = data.get("users", [])
-            self.active_users = users
-            self.update_user_list(users[::-1])
+            usernames = data.get("usernames", [])
+            self.active_users = usernames
+            self.update_user_list(usernames[::-1])
             self.display_system_message(f"{username} has left the chat.")
 
         @self.sio.event
@@ -91,17 +97,51 @@ class ChatClientGUI:
 
     def connect_to_server(self):
         def connect():
-            self.display_system_message("Connecting to server...")
             try:
+                is_connecting = True
                 self.sio.connect(SERVER_API_URL)
                 self.sio.wait()
             except Exception as e:
-                self.display_system_message(f"Connection failed: {e}")
+                print(f"Connection failed: {e}")
+
+            finally:
+                is_connecting = False
 
         threading.Thread(target=connect, daemon=True).start()
-        
 
-    def login_screen(self):
+    def update_user_server(self):
+        """Update the server with the current username."""
+        if self.sio.connected:
+            self.sio.emit('user_joined', {'username': self.username})
+        else:
+            messagebox.showerror("Error", "Not connected to server.")
+
+    def validate_username(self, username):
+        username = username.strip()
+
+        current_users = self.sio.call('get_current_users').get('current_usernames', [])
+        self.active_users = current_users
+
+        if not self.sio.connected:
+            messagebox.showerror("Error", "Not connected to server.")
+            return False
+        
+        if not username:
+            messagebox.showwarning("Warning", "Please input a username.")
+            return False
+        elif len(username) > 9:
+            messagebox.showwarning("Warning", "Username is too long. Please use a shorter username.")
+            return False
+        elif username in self.active_users:
+            messagebox.showwarning("Warning", "This username is already taken. Please choose another one.")
+            return False
+    
+        self.username = username
+        self.chatroom_screen()
+
+        return True
+
+    def setup_login_screen(self):
         self.login = tk.Toplevel()
         setup_window(self.login, "FUV Chatroom Login", 600, 400)
         
@@ -117,7 +157,7 @@ class ChatClientGUI:
         
         # Can push button to go next
         self.button = tk.Button(self.login, text = "→", font=(FONT, 14),
-                                command = lambda : self.goto_chatroom(self.entry_username.get()))
+                                command = lambda : self.validate_username(self.entry_username.get()))
         self.button.place(relx=0.5, rely=0.5, anchor="center")
         
         # Can enter to go next
@@ -125,34 +165,19 @@ class ChatClientGUI:
         
         # Exit
         self.login.protocol("WM_DELETE_WINDOW", self.graceful_exit)
-    
-    def goto_chatroom(self, username):
 
-        if username.strip() == "":
-            # Dont allow an empty username
-            messagebox.showwarning("Warning", "Please input an username")
-            return
-        elif len(username.strip()) > 9:
-            # Dont allow long usernames
-            messagebox.showwarning("Warning", "Please input a shorter username")
-            return
-        elif username in self.active_users:
-            # Dont allow duplicate username
-            messagebox.showwarning("Warning", "This username has already been used. Please choose another username.")
-            return
-        
-        self.login.destroy()
-        self.chatroom_screen(username)
-        
-        # self.active_users.append(username)
-        # self.update_user_list(self.active_users[::-1])
-            
-    def chatroom_screen(self, username):
+    def login_screen(self):
+        self.connect_to_server()
+        print("Connecting to server...")
+        while (not self.sio.connected):
+            continue
+
+        self.setup_login_screen()
+
+    def setup_chatroom_screen(self):
         self.Window.deiconify()
         setup_window(self.Window, "FUV Chatroom", 900, 600)
-        
-        self.username = username
-        
+
         # Configure grid weights for resizing
         self.Window.grid_rowconfigure(1, weight=1)
         self.Window.grid_columnconfigure(0, weight=3)
@@ -163,7 +188,7 @@ class ChatClientGUI:
         self.chat_label = tk.Label(self.Window, text="FUV Chatroom", bg="midnight blue", fg="white", font=("Arial", 20, "bold"))
         self.chat_label.grid(row=0, column=0, columnspan=2, sticky="ew")
 
-        self.user_label = tk.Label(self.Window, text="You: " + username, font=("Arial", 10))
+        self.user_label = tk.Label(self.Window, text="You: " + self.username, font=("Arial", 10))
         self.user_label.grid(row=3, column=2, sticky="e", padx=10)
         
         self.active_label = tk.Label(self.Window, text="Active", bg="midnight blue", fg="white", font=("Arial", 16))
@@ -222,13 +247,16 @@ class ChatClientGUI:
             font=("Arial", 10, "italic")
         )
         self.suggestion_label.grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 5))
-        self.suggestion_label.grid_remove()
-        
-        ### Connect to the server
-        self.connect_to_server()
+        self.suggestion_label.grid_remove()     
 
         # Exit protocol
-        self.Window.protocol("WM_DELETE_WINDOW", self.graceful_exit)
+        self.Window.protocol("WM_DELETE_WINDOW", self.graceful_exit)   
+    
+    def chatroom_screen(self):
+        self.login.destroy()
+        self.setup_chatroom_screen()
+        self.update_user_server()
+        # self.update_user_list(self.active_users[::-1])     
 
     def show_emoji_picker(self):
         """Create and show the emoji picker window"""
