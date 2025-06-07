@@ -87,7 +87,7 @@ class ChatClientGUI:
             timestamp = datetime.now().strftime("%H:%M:%S")
             sender = data.get("sender", "Unknown")
             message = data.get("message", "")
-            self.display_message('private', sender, message, timestamp)
+            self.display_message('Private', sender, message, timestamp)
 
     def connect_to_server(self):
         def connect():
