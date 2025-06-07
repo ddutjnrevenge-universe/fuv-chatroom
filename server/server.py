@@ -23,8 +23,8 @@ def index():
 @sio.event
 def connect(sid, environ):
     print('Client connected:', sid)
-    # sio.emit('current_users', {'users': users}, room=sid)
-    # print(environ)
+    usernames = [user['username'] for user in users]
+    # sio.emit('current_users', {'usernames': usernames}, room=sid)
 
 @sio.event
 def user_joined(sid, data):
@@ -32,7 +32,7 @@ def user_joined(sid, data):
     users.append({'username': username, 'sid': sid})
     usernames = [user['username'] for user in users]
     print(f'User {username} joined with session ID {sid}')
-    sio.emit('user_joined', {'username': username, 'users': usernames})
+    sio.emit('user_joined', {'username': username, 'usernames': usernames})
 
 @sio.event
 def user_left(sid, data):
@@ -41,11 +41,26 @@ def user_left(sid, data):
     users[:] = [user for user in users if user['sid'] != sid]
     usernames = [user['username'] for user in users]
     print(f'User {username} left with session ID {sid}')
-    sio.emit('user_left', {'username': username, 'users': usernames})
+    sio.emit('user_left', {'username': username, 'usernames': usernames})
+
+@sio.event
+def get_current_users(sid):
+    usernames = [user['username'] for user in users]
+    print(f'Current users requested by {sid}: {usernames}')
+    return {'current_usernames': usernames}
 
 @sio.event
 def disconnect(sid):
-    print('Client disconnected:', sid)
+    # print('Client disconnected:', sid)
+
+    for user in users:
+        if user['sid'] == sid:
+            username = user['username']
+            users.remove(user)
+            usernames = [user['username'] for user in users]
+            sio.emit('user_left', {'username': username, 'users': usernames})
+            print(f'User {username} disconnected with session ID {sid}')
+            break
 
 @sio.event
 def global_message(sid, data):
