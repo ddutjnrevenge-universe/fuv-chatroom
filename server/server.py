@@ -1,5 +1,11 @@
 from flask import Flask, render_template_string
 import socketio
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from crypto_utils import encrypt_message, decrypt_message
+
+
 
 sio = socketio.Server()
 app = Flask(__name__)
@@ -72,7 +78,9 @@ def global_message(sid, data):
 @sio.event
 def private_message(sid, data):
     recipient_name = data.get('recipient', '')
-    recipient_sid = None
+    # recipient_sid = None
+    recipient_sid = next((u['sid'] for u in users if u['username'] == recipient_name), None)
+
     for user in users:
         if user['username'] == recipient_name:
             recipient_sid = user['sid']

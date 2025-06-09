@@ -7,6 +7,11 @@ from datetime import datetime
 from emoji_dict import EMOJI_DICT
 import threading
 import socketio
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from server.crypto_utils import encrypt_message, decrypt_message
+
 
 FONT = "Helvetica"
 SERVER_API_URL = "http://localhost:8080"
@@ -83,17 +88,33 @@ class ChatClientGUI:
 
         @self.sio.event
         def incoming_global_message(data):
-            timestamp = datetime.now().strftime("%H:%M:%S")
+            # timestamp = datetime.now().strftime("%H:%M:%S")
+            # sender = data.get("sender", "Unknown")
+            # message = data.get("message", "")
+            # self.display_message("Global", sender, message, timestamp)
             sender = data.get("sender", "Unknown")
-            message = data.get("message", "")
-            self.display_message("Global", sender, message, timestamp)
+            try:
+                decrypted = decrypt_message(data.get("message", ""))
+                timestamp, message = decrypted.split("|", 1)
+                self.display_message("Global", sender, message, timestamp)
+            except Exception as e:
+                self.display_system_message(f"Failed to decrypt global message from {sender}")
 
         @self.sio.event
         def incoming_private_message(data):
-            timestamp = datetime.now().strftime("%H:%M:%S")
+            # timestamp = datetime.now().strftime("%H:%M:%S")
+            # sender = data.get("sender", "Unknown")
+            # message = data.get("message", "")
+            # self.display_message('Private', sender, message, timestamp)
             sender = data.get("sender", "Unknown")
-            message = data.get("message", "")
-            self.display_message('private', sender, message, timestamp)
+            try:
+                decrypted = decrypt_message(data.get("message", ""))
+                timestamp, message = decrypted.split("|", 1)
+                # self.display_message("Private", sender, message, timestamp)
+                self.display_message("Private", f"From {sender}", message, timestamp)
+
+            except Exception as e:
+                self.display_system_message(f"Failed to decrypt private message from {sender}")
 
     def connect_to_server(self):
         def connect():
@@ -161,7 +182,7 @@ class ChatClientGUI:
         self.button.place(relx=0.5, rely=0.5, anchor="center")
         
         # Can enter to go next
-        self.entry_username.bind("<Return>", lambda event: self.goto_chatroom(self.entry_username.get()))
+        self.entry_username.bind("<Return>", lambda event: self.validate_username(self.entry_username.get()))
         
         # Exit
         self.login.protocol("WM_DELETE_WINDOW", self.graceful_exit)
@@ -242,7 +263,7 @@ class ChatClientGUI:
         # Suggestion label - moved to row 4 and spans both columns
         self.suggestion_label = tk.Label(
             self.Window,
-            text="Tip: Type '/p [username] [message]' to send a private message",
+            text="Tip: Type '/w [username] [message]' to send a private message",
             fg="#2E86C1",
             font=("Arial", 10, "italic")
         )
@@ -470,49 +491,50 @@ class ChatClientGUI:
             self.suggestion_label.grid()
         elif not current_text.startswith('/'):
             self.suggestion_label.grid_remove()
-        
+    
     def send_message(self):
         raw_msg = self.entry_var.get()
         if raw_msg.strip() == "":
             return
 
-        # Replace emoji text with Unicode
+        # Replace emoji codes with actual emojis
         for code, emoji in EMOJI_DICT.items():
             raw_msg = raw_msg.replace(code, emoji)
 
         timestamp = datetime.now().strftime("%H:%M:%S")
-        
-        # Handle private messages (/w username message)
-        if raw_msg.startswith("/p "):
-            msg_type = "Private"
-            # Split the message into parts
-            parts = raw_msg.split(maxsplit=2)  # Split into ["/w", "username", "message"]
+
+        if raw_msg.startswith("/w "):
+            parts = raw_msg.split(maxsplit=2)
             if len(parts) >= 3:
                 recipient = parts[1]
-                message_content = parts[2]
-                # Format the displayed message without the /w command
-                formatted_msg = f"(To: {recipient}) {message_content}"
+                message_content = parts[2]  
+                plaintext = f"{timestamp}|{message_content}" 
+                encrypted_msg = encrypt_message(plaintext)
 
                 self.sio.emit('private_message', {
                     'recipient': recipient,
-                    'message': message_content,
+                    'message': encrypted_msg,
                     'sender': self.username
                 })
+
+                # self.display_message("Private", self.username, message_content, timestamp)
+                self.display_message("Private", f"To {recipient}", message_content, timestamp)
+
             else:
-                # Show error for invalid format
                 self.display_system_message("Invalid private message format. Use '/w username message'")
                 return
         else:
-            msg_type = "Global"
-            formatted_msg = raw_msg
+            message_content = raw_msg
+            plaintext = f"{timestamp}|{message_content}"  
+            encrypted_msg = encrypt_message(plaintext)
 
-            # self.display_message(msg_type, self.username, formatted_msg, timestamp)
             self.sio.emit('global_message', {
-                'message': formatted_msg,
+                'message': encrypted_msg,
                 'sender': self.username
             })
 
         self.entry_var.set("")
+
 
     def display_message(self, msg_type, sender, message, timestamp):
         self.chat_box.config(state="normal")
