@@ -58,7 +58,7 @@ def disconnect(sid):
             username = user['username']
             users.remove(user)
             usernames = [user['username'] for user in users]
-            sio.emit('user_left', {'username': username, 'users': usernames})
+            sio.emit('user_left', {'username': username, 'usernames': usernames})
             print(f'User {username} disconnected with session ID {sid}')
             break
 
