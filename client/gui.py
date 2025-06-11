@@ -233,6 +233,7 @@ class ChatClientGUI:
         # Active user list
         self.user_list = tk.Listbox(self.Window, width=28, height=28, font=("Arial", 14))
         self.user_list.grid(row=1, column=2, padx=5, pady=5, sticky="nsew")
+        self.user_list.bind("<<ListboxSelect>>", self.on_user_selected)
 
         # Entry box
         self.entry_var = tk.StringVar()
@@ -482,7 +483,7 @@ class ChatClientGUI:
         current_text = self.entry_var.get()
         
         # Show suggestion if user types '/' at start of message
-        if current_text.startswith('/') and len(current_text) == 1:
+        if current_text.startswith('/'):
             self.suggestion_label.grid()
         elif not current_text.startswith('/'):
             self.suggestion_label.grid_remove()
@@ -559,11 +560,23 @@ class ChatClientGUI:
         self.chat_box.config(state="disabled")
         self.chat_box.yview(tk.END)
 
+
+    # Event handler for user selection in the user list
+    def on_user_selected(self, event):
+        selected_indices = self.user_list.curselection()
+        if selected_indices:
+            index = selected_indices[0]
+            value = self.user_list.get(index)
+            username = value[2:].strip()
+            print(f"User clicked: {username}")
+            self.entry_var.set(f"/w {username} ")
+            self.check_for_slash_command(None)
+
     def update_user_list(self, users):
         self.user_list.delete(0, tk.END)
         for user in users:
             self.user_list.insert(tk.END, f"● {user}")
-        
+
     def graceful_exit(self):
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
             try:
