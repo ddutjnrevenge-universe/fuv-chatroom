@@ -1,39 +1,75 @@
-# crypto_utils.py
+# # crypto_utils.py
+# from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+# from cryptography.hazmat.primitives import padding
+# from cryptography.hazmat.backends import default_backend
+# import os
+# import base64
+# from dotenv import load_dotenv
+
+# # Load from .env
+# load_dotenv()
+
+# AES_KEY_HEX = os.getenv("AES_KEY")
+# if not AES_KEY_HEX:
+#     raise ValueError("AES_KEY not found in environment variables.")
+
+# AES_KEY = bytes.fromhex(AES_KEY_HEX)
+# if len(AES_KEY) != 32:
+#     raise ValueError("AES_KEY must be 32 bytes (256-bit).")
+
+# def encrypt_message(message: str) -> str:
+#     iv = os.urandom(16)  # AES block size is 16 bytes
+#     padder = padding.PKCS7(128).padder()
+#     padded_data = padder.update(message.encode()) + padder.finalize()
+
+#     cipher = Cipher(algorithms.AES(AES_KEY), modes.CBC(iv), backend=default_backend())
+#     encryptor = cipher.encryptor()
+#     ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+
+#     return base64.b64encode(iv + ciphertext).decode()
+
+# def decrypt_message(ciphertext_b64: str) -> str:
+#     data = base64.b64decode(ciphertext_b64.encode())
+#     iv = data[:16]
+#     ciphertext = data[16:]
+
+#     cipher = Cipher(algorithms.AES(AES_KEY), modes.CBC(iv), backend=default_backend())
+#     decryptor = cipher.decryptor()
+#     padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+#     unpadder = padding.PKCS7(128).unpadder()
+#     plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
+
+#     return plaintext.decode()
+
+import os, base64
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives import padding, serialization, hashes
 from cryptography.hazmat.backends import default_backend
-import os
-import base64
-from dotenv import load_dotenv
+from cryptography.hazmat.primitives.asymmetric import rsa, padding as rsa_padding
 
-# Load from .env
-load_dotenv()
+# AES part
 
-AES_KEY_HEX = os.getenv("AES_KEY")
-if not AES_KEY_HEX:
-    raise ValueError("AES_KEY not found in environment variables.")
+def generate_aes_key():
+    return os.urandom(32)  # 256-bit random key
 
-AES_KEY = bytes.fromhex(AES_KEY_HEX)
-if len(AES_KEY) != 32:
-    raise ValueError("AES_KEY must be 32 bytes (256-bit).")
-
-def encrypt_message(message: str) -> str:
-    iv = os.urandom(16)  # AES block size is 16 bytes
+def encrypt_aes(aes_key, message: str) -> str:
+    iv = os.urandom(16)
     padder = padding.PKCS7(128).padder()
     padded_data = padder.update(message.encode()) + padder.finalize()
 
-    cipher = Cipher(algorithms.AES(AES_KEY), modes.CBC(iv), backend=default_backend())
+    cipher = Cipher(algorithms.AES(aes_key), modes.CBC(iv), backend=default_backend())
     encryptor = cipher.encryptor()
     ciphertext = encryptor.update(padded_data) + encryptor.finalize()
 
     return base64.b64encode(iv + ciphertext).decode()
 
-def decrypt_message(ciphertext_b64: str) -> str:
+def decrypt_aes(aes_key, ciphertext_b64: str) -> str:
     data = base64.b64decode(ciphertext_b64.encode())
     iv = data[:16]
     ciphertext = data[16:]
 
-    cipher = Cipher(algorithms.AES(AES_KEY), modes.CBC(iv), backend=default_backend())
+    cipher = Cipher(algorithms.AES(aes_key), modes.CBC(iv), backend=default_backend())
     decryptor = cipher.decryptor()
     padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
 
@@ -41,3 +77,35 @@ def decrypt_message(ciphertext_b64: str) -> str:
     plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
 
     return plaintext.decode()
+
+# RSA part
+
+def load_rsa_public_key(filepath):
+    with open(filepath, "rb") as f:
+        public_key = serialization.load_pem_public_key(f.read())
+    return public_key
+
+def load_rsa_private_key(filepath):
+    with open(filepath, "rb") as f:
+        private_key = serialization.load_pem_private_key(f.read(), password=None)
+    return private_key
+
+def encrypt_rsa(public_key, data: bytes) -> bytes:
+    return public_key.encrypt(
+        data,
+        rsa_padding.OAEP(
+            mgf=rsa_padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+
+def decrypt_rsa(private_key, ciphertext: bytes) -> bytes:
+    return private_key.decrypt(
+        ciphertext,
+        rsa_padding.OAEP(
+            mgf=rsa_padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
