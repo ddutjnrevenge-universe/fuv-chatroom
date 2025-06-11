@@ -2,7 +2,7 @@
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
-
+import base64
 from datetime import datetime
 from emoji_dict import EMOJI_DICT
 import threading
@@ -10,8 +10,15 @@ import socketio
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from server.crypto_utils import encrypt_message, decrypt_message
 
+from server.crypto_utils import (
+    load_rsa_public_key, encrypt_rsa, generate_aes_key,
+    encrypt_aes, decrypt_aes
+)
+
+# Dynamically construct the path to the server's public key
+key_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'server', 'public_key.pem'))
+public_key = load_rsa_public_key(key_path)
 
 FONT = "Helvetica"
 SERVER_API_URL = "http://localhost:8080"
@@ -54,6 +61,13 @@ class ChatClientGUI:
         def connect():
             print("Connected to server.")
 
+            # # After connection, generate AES key & exchange
+            self.session_aes_key = generate_aes_key()
+            encrypted_aes = encrypt_rsa(public_key, self.session_aes_key)
+            encrypted_aes_b64 = base64.b64encode(encrypted_aes).decode()
+            self.sio.emit('exchange_key', {'encrypted_aes': encrypted_aes_b64})
+
+
         @self.sio.event
         def current_users(data):
             usernames = data.get('usernames', [])
@@ -88,13 +102,11 @@ class ChatClientGUI:
 
         @self.sio.event
         def incoming_global_message(data):
-            # timestamp = datetime.now().strftime("%H:%M:%S")
-            # sender = data.get("sender", "Unknown")
-            # message = data.get("message", "")
-            # self.display_message("Global", sender, message, timestamp)
             sender = data.get("sender", "Unknown")
             try:
-                decrypted = decrypt_message(data.get("message", ""))
+                # decrypted = decrypt_message(data.get("message", ""))
+                decrypted = decrypt_aes(self.session_aes_key, data.get("message", ""))
+
                 timestamp, message = decrypted.split("|", 1)
                 self.display_message("Global", sender, message, timestamp)
             except Exception as e:
@@ -102,13 +114,10 @@ class ChatClientGUI:
 
         @self.sio.event
         def incoming_private_message(data):
-            # timestamp = datetime.now().strftime("%H:%M:%S")
-            # sender = data.get("sender", "Unknown")
-            # message = data.get("message", "")
-            # self.display_message('Private', sender, message, timestamp)
             sender = data.get("sender", "Unknown")
             try:
-                decrypted = decrypt_message(data.get("message", ""))
+                # decrypted = decrypt_message(data.get("message", ""))
+                decrypted = decrypt_aes(self.session_aes_key, data.get("message", ""))
                 timestamp, message = decrypted.split("|", 1)
                 # self.display_message("Private", sender, message, timestamp)
                 self.display_message("Private", f"From {sender}", message, timestamp)
@@ -119,15 +128,10 @@ class ChatClientGUI:
     def connect_to_server(self):
         def connect():
             try:
-                is_connecting = True
                 self.sio.connect(SERVER_API_URL)
                 self.sio.wait()
             except Exception as e:
                 print(f"Connection failed: {e}")
-
-            finally:
-                is_connecting = False
-
         threading.Thread(target=connect, daemon=True).start()
 
     def update_user_server(self):
@@ -427,15 +431,6 @@ class ChatClientGUI:
             btn.pack(side="right")
 
     def insert_emoji(self, emoji):
-        # """Insert the selected emoji into the message input"""
-        # current_text = self.entry_var.get()
-        # self.entry_var.set(current_text + emoji)
-        # self.entry_box.focus()
-        
-        # # Close the emoji picker if open
-        # if self.emoji_window and self.emoji_window.winfo_exists():
-        #     self.emoji_window.destroy()
-        #     self.emoji_window = None
         """Insert the selected emoji into the message input with correct cursor position"""
         try:
             current_pos = self.entry_box.index(tk.INSERT)
@@ -509,7 +504,9 @@ class ChatClientGUI:
                 recipient = parts[1]
                 message_content = parts[2]  
                 plaintext = f"{timestamp}|{message_content}" 
-                encrypted_msg = encrypt_message(plaintext)
+                # encrypted_msg = encrypt_message(plaintext)
+                encrypted_msg = encrypt_aes(self.session_aes_key, plaintext)
+
 
                 self.sio.emit('private_message', {
                     'recipient': recipient,
@@ -517,7 +514,6 @@ class ChatClientGUI:
                     'sender': self.username
                 })
 
-                # self.display_message("Private", self.username, message_content, timestamp)
                 self.display_message("Private", f"To {recipient}", message_content, timestamp)
 
             else:
@@ -526,7 +522,8 @@ class ChatClientGUI:
         else:
             message_content = raw_msg
             plaintext = f"{timestamp}|{message_content}"  
-            encrypted_msg = encrypt_message(plaintext)
+            encrypted_msg = encrypt_aes(self.session_aes_key, plaintext)
+
 
             self.sio.emit('global_message', {
                 'message': encrypted_msg,
