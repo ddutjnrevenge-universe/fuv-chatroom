@@ -16,9 +16,8 @@ from server.crypto_utils import (
     encrypt_aes, decrypt_aes
 )
 
-# Dynamically construct the path to the server's public key
-key_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'server', 'public_key.pem'))
-public_key = load_rsa_public_key(key_path)
+# Load server private key
+public_key = load_rsa_public_key("public_key.pem")
 
 FONT = "Helvetica"
 SERVER_API_URL = "http://localhost:8080"
@@ -34,8 +33,8 @@ def center_window(window, width, height):
 
 def setup_window(window, title, width, height):
     window.title(title)
-    window.resizable(False, False)
-    window.configure(width = width, height = height)
+    window.resizable(True, True)  # Allow window to be resizable
+    window.configure(width=width, height=height)
     center_window(window, width, height)
 
 class ChatClientGUI:
@@ -286,17 +285,24 @@ class ChatClientGUI:
 
     def show_emoji_picker(self):
         """Create and show the emoji picker window"""
-        if self.emoji_window and self.emoji_window.winfo_exists():
-            self.emoji_window.lift()
-            return
+        # if self.emoji_window and self.emoji_window.winfo_exists():
+        #     self.emoji_window.lift()
+        #     return
             
-        self.emoji_window = tk.Toplevel(self.Window)
-        self.emoji_window.title("Emoji Picker")
-        self.emoji_window.geometry("400x300")
-        self.emoji_window.resizable(False, False)
+        # self.emoji_window = tk.Toplevel(self.Window)
+        # self.emoji_window.title("Emoji Picker")
+        # self.emoji_window.geometry("400x300")
+        # self.emoji_window.resizable(False, False)
+        if hasattr(self, 'emoji_frame') and self.emoji_frame.winfo_exists():
+            self.emoji_frame.destroy()
+            return
+
+        # Create embedded frame inside chat window
+        self.emoji_frame = tk.Frame(self.Window, borderwidth=1, relief="solid")
+        self.emoji_frame.grid(row=5, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
         
         # Create tabs for different emoji categories
-        tab_control = ttk.Notebook(self.emoji_window)
+        tab_control = ttk.Notebook(self.emoji_frame)
         
         # Create tabs - you can organize these as you like
         smileys_tab = ttk.Frame(tab_control)
@@ -333,20 +339,31 @@ class ChatClientGUI:
         ])
         
         self.populate_emoji_tab(symbols_tab, [
-            "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍",
-            "🤎", "💔", "❣️", "💕", "💞", "💓", "💗", "💖",
-            "💘", "💝", "💟", "☮️", "✝️", "☪️", "🕉", "☸️",
-            "✡️", "🔯", "🕎", "☯️", "☦️", "🛐", "⛎", "♈️"
+            "🩷", "🧡", "💛", "💚", "💙", "🩵", "💜", "🤎", "🖤", "🩶", "🤍", "💔",
+            "❣️", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟", "💌", "💢", "💥", 
+            "💤", "💦", "💨", "💫", "🕳️", "🅰️", "🅱️", "🆎", "🆑", "🅾️", "🆘", "⛔", 
+            "🛑", "📛", "❌", "⭕", "🚫", "🔇", "🔕", "🚭", "🚷", "🚯", "🚳", "🚱", 
+            "🔞", "📵", "❗", "❕", "❓", "❔", "‼️", "⁉️", "💯", "✅", "❎"
         ])
         
-        # Add search functionality
-        search_frame = tk.Frame(self.emoji_window)
-        search_frame.pack(fill="x", padx=5, pady=5)
+        # # Add search functionality
+        # search_frame = tk.Frame(self.emoji_window)
+        # search_frame.pack(fill="x", padx=5, pady=5)
         
+        # search_var = tk.StringVar()
+        # search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Arial", 12))
+        # search_entry.pack(side="left", fill="x", expand=True)
+        
+        # search_btn = tk.Button(search_frame, text="Search", command=lambda: self.search_emojis(search_var.get()))
+        # search_btn.pack(side="right", padx=5)
+        # Add search box inside emoji frame (at top)
+        search_frame = tk.Frame(self.emoji_frame)
+        search_frame.pack(fill="x", padx=5, pady=5)
+
         search_var = tk.StringVar()
         search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Arial", 12))
         search_entry.pack(side="left", fill="x", expand=True)
-        
+
         search_btn = tk.Button(search_frame, text="Search", command=lambda: self.search_emojis(search_var.get()))
         search_btn.pack(side="right", padx=5)
 
