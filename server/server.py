@@ -87,7 +87,23 @@ def disconnect(sid):
     #         break
     # aes_keys.pop(sid, None)
     global users
+    # Find the username associated with the sid
+    username = None
+    for user in users:
+        if user['sid'] == sid:
+            username = user['username']
+            break
+
     users = [user for user in users if user['sid'] != sid]
+    usernames = [user['username'] for user in users]
+
+    if username:
+        sio.emit('user_left', {'username': username, 'usernames': usernames})
+        print(f"User {username} disconnected with session ID {sid}")
+    else:
+        sio.emit('user_left', {'username': 'Unknown', 'usernames': usernames})
+        print(f"Client disconnected: {sid}")
+
     aes_keys.pop(sid, None)
 
 # Current active user list (optional)
