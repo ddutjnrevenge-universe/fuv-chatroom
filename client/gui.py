@@ -281,7 +281,7 @@ class ChatClientGUI:
         self.update_user_server()
         self.login.destroy()
         self.setup_chatroom_screen()
-        # self.update_user_list(self.active_users[::-1])     
+        self.update_user_list(self.active_users[::-1])     
 
     def show_emoji_picker(self):
         """Create and show the emoji picker window"""
@@ -610,8 +610,7 @@ class ChatClientGUI:
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
             try:
                 if self.sio.connected:
-                    self.sio.emit('user_left', {'username': self.username})
-                self.sio.disconnect()
+                    self.sio.disconnect()   
             except:
                 pass
             self.Window.destroy()
