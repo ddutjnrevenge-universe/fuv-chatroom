@@ -2,11 +2,14 @@
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
+from tkinter.ttk import Progressbar
 import base64
 from datetime import datetime
 from emoji_dict import EMOJI_DICT
 import threading
 import socketio
+import time
+
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -21,6 +24,8 @@ public_key = load_rsa_public_key("public_key.pem")
 
 FONT = "Helvetica"
 SERVER_API_URL = "http://localhost:8080"
+CHUNK_SIZE = 4096 # 4KB
+
 is_connecting = False
 connection_failed = False
 
@@ -44,8 +49,9 @@ class ChatClientGUI:
 
         self.emoji_window = None
         self.username = None
-        self.send_file = False
         self.active_users = []
+        
+        self.download_files = {}
         
         # setup the socket client
         self.sio = socketio.Client()
@@ -65,7 +71,6 @@ class ChatClientGUI:
             encrypted_aes = encrypt_rsa(public_key, self.session_aes_key)
             encrypted_aes_b64 = base64.b64encode(encrypted_aes).decode()
             self.sio.emit('exchange_key', {'encrypted_aes': encrypted_aes_b64})
-
 
         @self.sio.event
         def current_users(data):
@@ -123,7 +128,35 @@ class ChatClientGUI:
 
             except Exception as e:
                 self.display_system_message(f"Failed to decrypt private message from {sender}")
-
+        
+        @self.sio.event
+        def file_ready(data):
+            sender = data.get("sender", "Unknown")
+            filename = data.get("filename", "")
+            timestamp = data.get("time", "")
+            
+            if sender == self.username:
+                self.success_display_file("Global", sender, filename, timestamp)
+                # self.display_download_button(filename)
+            else:
+                self.success_display_file("Global", f"From {sender}", filename, timestamp)
+        
+        @self.sio.event
+        def incoming_file_chunk(data):
+            chunk_data = data.get("chunk_data")
+            filename = data.get("filename", "")
+            
+            if chunk_data:
+                decoded = base64.b64decode(chunk_data.encode())
+                self.download_files[filename]['data'].append(decoded)
+                        
+        @self.sio.event
+        def finish_download(data):
+            filename = data.get("filename", "")
+            if filename in self.download_files:
+                threading.Thread(target=self.save_file, args=(filename,), daemon=True).start()
+                messagebox.showinfo("Download", f"Finish downloading {filename}.")
+        
     def connect_to_server(self):
         def connect():
             try:
@@ -268,6 +301,7 @@ class ChatClientGUI:
         self.suggestion_label = tk.Label(
             self.Window,
             text="Tip: Type '/w [username] [message]' to send a private message",
+            # text="Tip: Type '/w [username] [message]' to send a private message \n Type '/pfilew [username] [file path]' to send a private file\nType '/gfilew [username] [file path]' to send a global file",
             fg="#2E86C1",
             font=("Arial", 10, "italic")
         )
@@ -487,14 +521,109 @@ class ChatClientGUI:
 
             if extension in accept_extension:
                 if f_size_mb <= 25:
-                    self.send_file = True
-                    self.display_system_message(f"Selected file: {filepath.split('/')[-1]}")
-                    # You would later send this file to the server
+                    # self.display_system_message(f"Selected file: {filepath.split('/')[-1]}")
+                    threading.Thread(target=self.send_file, args=(filepath,), daemon=True).start()
                 else:
                     messagebox.showwarning("Warning", "Please choose a file smaller than 25 MB.")
             else:
                 messagebox.showwarning("Warning", "Inappropriate file type (not video, image, or audio)")
-
+    
+    def send_file(self, path):   
+        # print(f"[DEBUG] Uploading {os.path.basename(path)} in thread: {threading.current_thread().name}")     
+        try:
+            filename = os.path.basename(path)
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            
+            self.display_system_message(f"File {filename} is uploading. Waiting for server confirmation...")
+            # self.display_message("Global", self.username, filename, timestamp)
+            
+            self.sio.emit('start_upload', {
+                          'filename': filename,
+                          'sender': self.username
+                         })
+            
+            with open(path, "rb") as file:
+                while True:
+                    chunk = file.read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    encoded_data = base64.b64encode(chunk).decode()
+                    self.sio.emit('upload_chunk', {
+                                  'filename': filename,
+                                  'chunk_data': encoded_data
+                                 })
+                    # print(f"[DEBUG] Writing {threading.current_thread().name}, {filename}")
+                    time.sleep(0.05)
+                    
+            time.sleep(0.5)
+            self.sio.emit('finish_upload', {
+                          'filename': filename, 
+                          'sender': self.username, 
+                          'time': timestamp})
+            
+        except Exception as e:
+            messagebox.showerror("Error", "File transfer failed")
+    
+    # def process_display_file(self, msg_type, sender, timestamp, filename):
+        # def process_bar():
+        #     pass
+        
+        # self.chat_box.config(state="normal")
+        # tag = "blue" if msg_type == "Global" else "orange"
+        # formatted = f"({msg_type}) ({sender}) ({timestamp}): {filename}"
+        # self.chat_box.insert(tk.END, formatted, tag)
+        
+        # bar = Progressbar(self.chat_box, orient = HORIZONTAL, length= 10)
+        
+        # self.chat_box.tag_config("blue", foreground="blue")
+        # self.chat_box.tag_config("orange", foreground="darkorange")
+        # self.chat_box.config(state="disabled")
+        # self.chat_box.yview(tk.END)
+    
+    def save_file(self, filename):
+        try:
+            saving_file = self.download_files.get(filename)
+            # print(saving_file['path'])
+            with open(saving_file['path'], "wb") as file:
+                for chunk in saving_file['data']:
+                    file.write(chunk)
+        except Exception as e:
+            messagebox.showerror("Error", "Error saving file")
+        finally:
+            self.download_files.pop(filename, None)
+    
+    def ask_download(self, filename):
+        if messagebox.askyesno("Download", f"Do you want to download {filename}?"):
+            save_path = filedialog.asksaveasfilename(title="Save As", initialfile=filename)
+            if save_path:
+                self.download_files[filename] = {'data': [], 'path': save_path}
+                self.sio.emit('download_request', {'filename': filename})
+    
+    # def display_download_button(self, filename):
+    #     download_button = tk.Button(self.chat_box, text = "⬇", command = lambda : self.ask_download(filename), 
+    #                                 bg="midnight blue", fg="white", relief="flat", width= 2, 
+    #                                 padx=0, pady=0, font=(FONT, 11))
+    #     self.chat_box.window_create(tk.END, window = download_button, pady=3)
+    #     self.chat_box.insert(tk.END, "\n")
+    
+    def success_display_file(self, msg_type, sender, filename, timestamp):
+        self.chat_box.config(state="normal")
+        tag = "blue" if msg_type == "Global" else "orange"
+        formatted = f"({msg_type}) ({sender}) ({timestamp}): {filename} "
+        self.chat_box.insert(tk.END, formatted, tag)
+        
+        # self.display_download_button(filename)
+        download_button = tk.Button(self.chat_box, text = "⬇", command = lambda : self.ask_download(filename), 
+                                    bg="midnight blue", fg="white", relief="flat", width= 2, 
+                                    padx=0, pady=0, font=(FONT, 11))
+        self.chat_box.window_create(tk.END, window = download_button, pady=3)
+        self.chat_box.insert(tk.END, "\n")
+        
+        self.chat_box.tag_config("blue", foreground="blue")
+        self.chat_box.tag_config("orange", foreground="darkorange")
+        self.chat_box.config(state="disabled")
+        self.chat_box.yview(tk.END)
+    
     def check_for_slash_command(self, event):
         """Check if user typed '/' and show suggestion"""
         current_text = self.entry_var.get()
@@ -524,7 +653,6 @@ class ChatClientGUI:
                 plaintext = f"{timestamp}|{message_content}" 
                 # encrypted_msg = encrypt_message(plaintext)
                 encrypted_msg = encrypt_aes(self.session_aes_key, plaintext)
-
 
                 self.sio.emit('private_message', {
                     'recipient': recipient,
@@ -568,14 +696,7 @@ class ChatClientGUI:
         
         self.chat_box.config(state="normal")
         
-        if self.send_file == True:
-            status = "(Sent)"
-        else:
-            status = ""
-        
-        print(status)
-        
-        formatted = f"(System) ({datetime.now().strftime('%H:%M:%S')}): {message} {status}\n"
+        formatted = f"(System) ({datetime.now().strftime('%H:%M:%S')}): {message} \n"
         self.chat_box.insert(tk.END, formatted, "gray")
         self.chat_box.tag_config("gray", foreground="gray")
         self.chat_box.config(state="disabled")

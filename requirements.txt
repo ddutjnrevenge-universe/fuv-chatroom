@@ -1,8 +1,10 @@
 #client
 python-socketio[client]
 requests
+time
 
 #server
 python-socketio
 flask
 cryptography
+eventlet
