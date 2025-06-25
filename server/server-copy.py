@@ -3,7 +3,7 @@ import socketio
 import sys
 import os
 import base64
-# import eventlet
+import eventlet
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from crypto_utils import load_rsa_private_key, decrypt_rsa, decrypt_aes, encrypt_aes
@@ -16,6 +16,15 @@ app.wsgi_app = socketio.WSGIApp(sio, app.wsgi_app)
 # User storage
 users = []  # store connected users: {sid, username}
 aes_keys = {}  # sid -> AES key
+
+# File
+UPLOAD_FOLDER = "upload_files"
+CHUNK_SIZE = 4096 # 4 KB 
+os.makedirs(UPLOAD_FOLDER, exist_ok = True)
+
+# Tracking file: sid -> file object
+upload_files = {}
+# download_files = {}
 
 # Load server private key
 private_key = load_rsa_private_key("private_key.pem")
@@ -106,6 +115,16 @@ def disconnect(sid):
         print(f"Client disconnected: {sid}")
 
     aes_keys.pop(sid, None)
+    
+    # Clean up incomplete/corrupted resources when a client disconnects 
+    # if sid in upload_files:
+    #     # Close the file
+    #     upload_files[sid].close()
+    #     # Remove the sid from the dictionary
+    #     del upload_files[sid]
+    # if sid in download_files:
+    #     download_files[sid].close()
+    #     del download_files[sid]
 
 # Current active user list (optional)
 @sio.event
@@ -164,20 +183,121 @@ def private_message(sid, data):
         print(f"Failed private message forwarding: {e}")
 
 # Start uploading file
+# @sio.event
+# def start_upload(sid, data):
+#     filename = data.get('filename', '')
+#     sender = data.get('sender', 'Anonymous')
+#     receiver = data.get('receiver', 'global')
+    
+#     path = os.path.join(UPLOAD_FOLDER, filename)
+    
+#     try:
+#         file = upload_files.get(sid)
+#         if file:
+#             file = open(path, 'wb')
+#             # file_open = open(path, 'wb')
+#             # file = {
+#             #     'filename': filename,
+#             #     'content': file_open, 
+#             #     'sender': sender,
+#             #     'receiver': receiver
+#             # }
+#             print(f"[Upload from {sender} to {receiver}] Start: {filename}")
+#     except Exception as e:
+#         print(f"[start_upload] Failed to create file: {e}")
 @sio.event
-def file_upload_start(sid, data):
-    pass
+def start_upload(sid, data):
+    filename = data.get('filename', '')
+    sender = data.get('sender', 'Anonymous')
+    # receiver = data.get('receiver', 'global')
 
-# Start 
-@sio.event
-def file_upload_chunk(sid, data):
-    pass
+    path = os.path.join(UPLOAD_FOLDER, filename)
 
+    try:
+        file = open(path, 'wb')
+        upload_files[(sid, filename)] = file  # Track the file by sid
+        print(f"[Upload from {sender} to Server] Start: {filename}")
+    except Exception as e:
+        print(f"[start_upload] Failed to create file: {e}")
+
+
+# Send checks
 @sio.event
-def file_upload_finish(sid, data):
-    pass
+def upload_chunk(sid, data):
+    # Decode the base64 to binary when server receives the chunks
+    chunk = base64.b64decode(data.get('chunk_data', None))
+    filename = data.get('filename', '')
+    
+    file = upload_files.get((sid, filename))
+    
+    if file:
+        try:
+            file.write(chunk) # Write in the received file
+            # print(f"[upload_chunk] Chunk received: {filename}")
+            # file['content'].write(chuck)
+        except Exception as e:
+            print(f"[upload_chunk] Failed to write chunk")
+
+# Finish uploading file
+@sio.event
+def finish_upload(sid, data):
+    filename = data.get('filename', '')
+    sender = data.get('sender', 'Anonymous')
+    # receiver = data.get('receiver', 'global')
+    timestamp = data.get('time', '')
+        
+    file = upload_files.get((sid, filename))
+    if not file:
+        return
+    
+    try: 
+        file.close()
+        
+        print(f"[Upload from {sender} to Server] Finished upload {filename}")
+        
+        for user in users:
+            # Notify 'file_ready' to all users
+            # Global file
+            sio.emit('file_ready', {
+                    'filename': filename,
+                    'sender': sender,
+                    'time': timestamp
+            }, room=user['sid'])
+    except Exception as e:
+        print(f"[finish_upload] Failed to finalize file")
+    finally:
+        upload_files.pop((sid, filename), None)
+
+# Request download file
+@sio.event
+def download_request(sid, data):
+    filename = data.get('filename', '')
+    path = os.path.join(UPLOAD_FOLDER, filename)
+    
+    if not os.path.exists(path):
+        print(f"[download_request] File not found: {filename}")
+        return
+
+    # Send chunks to receiver
+    def send_chunks():
+        try:
+            with open(path, 'rb') as file:
+                while True:
+                    chunk = file.read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    encoded_data = base64.b64encode(chunk).decode()
+                    sio.emit('incoming_file_chunk', {
+                             'chunk_data': encoded_data,
+                             'filename': filename}, 
+                             room=sid)
+            sio.emit('finish_download', {'filename': filename}, room=sid)
+        except Exception as e:
+            print(f"[send_chunks] Failed to send file: {e}")
+    
+    sio.start_background_task(send_chunks)
 
 # Run server
 if __name__ == '__main__':
-    app.run(port=8080, debug=True)
-    # eventlet.wsgi.server(eventlet.listen(('localhost', 8080)), app)
+    # app.run(port=8080, debug=True)
+    eventlet.wsgi.server(eventlet.listen(('localhost', 8080)), app)
