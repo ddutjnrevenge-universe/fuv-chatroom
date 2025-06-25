@@ -312,10 +312,10 @@ class ChatClientGUI:
         self.Window.protocol("WM_DELETE_WINDOW", self.graceful_exit)   
     
     def chatroom_screen(self):
+        self.update_user_server()
         self.login.destroy()
         self.setup_chatroom_screen()
-        self.update_user_server()
-        # self.update_user_list(self.active_users[::-1])     
+        self.update_user_list(self.active_users[::-1])     
 
     def show_emoji_picker(self):
         """Create and show the emoji picker window"""
@@ -690,6 +690,10 @@ class ChatClientGUI:
         self.chat_box.yview(tk.END)
 
     def display_system_message(self, message):
+        if not hasattr(self, 'chat_box'):
+            print("Chat box not initialized.")
+            return
+        
         self.chat_box.config(state="normal")
         
         formatted = f"(System) ({datetime.now().strftime('%H:%M:%S')}): {message} \n"
@@ -711,6 +715,14 @@ class ChatClientGUI:
             self.check_for_slash_command(None)
 
     def update_user_list(self, users):
+        if (not hasattr(self, 'user_list') or 
+            self.user_list is None or 
+            not isinstance(users, list)
+        ):
+            print("User list not initialized or invalid users data.")
+            return
+        
+        # Clear the current list
         self.user_list.delete(0, tk.END)
         for user in users:
             self.user_list.insert(tk.END, f"● {user}")
@@ -719,8 +731,7 @@ class ChatClientGUI:
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
             try:
                 if self.sio.connected:
-                    self.sio.emit('user_left', {'username': self.username})
-                self.sio.disconnect()
+                    self.sio.disconnect()   
             except:
                 pass
             self.Window.destroy()

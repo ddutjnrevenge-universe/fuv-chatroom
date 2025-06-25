@@ -3,181 +3,156 @@ import socketio
 import sys
 import os
 import base64
-# import eventlet
 
+# Add parent directory to path for module import
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from crypto_utils import load_rsa_private_key, decrypt_rsa, decrypt_aes, encrypt_aes
 
-# Initialize Flask + SocketIO
-sio = socketio.Server()
-app = Flask(__name__)
-app.wsgi_app = socketio.WSGIApp(sio, app.wsgi_app)
+class ChatServer:
+    def __init__(self):
+        # Initialize Flask and Socket.IO
+        self.sio = socketio.Server()
+        self.app = Flask(__name__)
+        self.app.wsgi_app = socketio.WSGIApp(self.sio, self.app.wsgi_app)
 
-# User storage
-users = []  # store connected users: {sid, username}
-aes_keys = {}  # sid -> AES key
+        # In-memory state
+        self.users = []          # Connected users: list of {'sid', 'username', 'aes_key'}
+        self.aes_keys = {}       # Temporary AES key store: sid -> aes_key
+        self.private_key = load_rsa_private_key("private_key.pem")  # Load RSA private key
 
-# Load server private key
-private_key = load_rsa_private_key("private_key.pem")
+        self.setup_routes()
+        self.register_events()
 
-# Minimal landing page (optional)
-INDEX_HTML = '''
-    <!DOCTYPE html>
-    <html>
-    <head><title>Chat</title></head>
-    <body>
-        <h1>Secure Chat Server</h1>
-    </body>
-    </html>
-'''
+    def setup_routes(self):
+        # Simple landing page
+        INDEX_HTML = '''
+        <!DOCTYPE html>
+        <html>
+        <head><title>Chat</title></head>
+        <body><h1>Secure Chat Server</h1></body>
+        </html>
+        '''
+        @self.app.route('/')
+        def index():
+            return render_template_string(INDEX_HTML)
 
-@app.route('/')
-def index():
-    return render_template_string(INDEX_HTML)
+    def register_events(self):
+        # --- Connection lifecycle ---
 
-# Handle new connection
-@sio.event
-def connect(sid, environ):
-    print(f"Client connected: {sid}")
+        @self.sio.event
+        def connect(sid, environ):
+            print(f"Client connected: {sid}")
 
-# Exchange AES key securely from client
-@sio.event
-def exchange_key(sid, data):
-    encrypted_aes_b64 = data.get('encrypted_aes')
-    encrypted_aes = base64.b64decode(encrypted_aes_b64.encode())
+        @self.sio.event
+        def disconnect(sid):
+            # Handle disconnect: remove user and notify others
+            username = None
+            for user in self.users:
+                if user['sid'] == sid:
+                    username = user['username']
+                    break
+            self.users = [user for user in self.users if user['sid'] != sid]
+            self.aes_keys.pop(sid, None)
+            usernames = [user['username'] for user in self.users]
 
-    try:
-        aes_key = decrypt_rsa(private_key, encrypted_aes)
-        # Instead of updating aes_keys dict, we update user list directly later when username is received.
-        # For now just temporarily store sid->aes_key map
-        aes_keys[sid] = aes_key
-        print(f"[Key Exchange] AES key received for client {sid}")
-    except Exception as e:
-        print(f"[Key Exchange] Failed: {e}")
+            if username:
+                print(f"User {username} disconnected ({sid})")
+                self.sio.emit('user_left', {'username': username, 'usernames': usernames})
+            else:
+                print(f"Client disconnected: {sid}")
+                self.sio.emit('user_left', {'username': 'Unknown', 'usernames': usernames})
 
-# Handle user joining
-@sio.event
-def user_joined(sid, data):
-    username = data.get('username', 'Unknown')
-    aes_key = aes_keys.get(sid)
-    users.append({'sid': sid, 'username': username, 'aes_key': aes_key})
-    usernames = [user['username'] for user in users]
-    print(f"User {username} joined with session ID {sid}")
-    sio.emit('user_joined', {'username': username, 'usernames': usernames})
+        # --- Key exchange and user join/leave ---
 
-# Handle user leaving
-@sio.event
-def user_left(sid, data):
-    username = data.get('username', 'Unknown')
-    users[:] = [user for user in users if user['sid'] != sid]
-    usernames = [user['username'] for user in users]
-    print(f"User {username} left with session ID {sid}")
-    sio.emit('user_left', {'username': username, 'usernames': usernames})
-    aes_keys.pop(sid, None)  # Clean up AES key when user leaves
+        @self.sio.event
+        def exchange_key(sid, data):
+            # Decrypt and store AES key sent by client
+            encrypted_aes_b64 = data.get('encrypted_aes')
+            encrypted_aes = base64.b64decode(encrypted_aes_b64.encode())
+            try:
+                aes_key = decrypt_rsa(self.private_key, encrypted_aes)
+                self.aes_keys[sid] = aes_key
+                print(f"[Key Exchange] AES key received for client {sid}")
+            except Exception as e:
+                print(f"[Key Exchange] Failed: {e}")
 
-# Handle disconnect
-@sio.event
-def disconnect(sid):
-    # for user in users:
-    #     if user['sid'] == sid:
-    #         username = user['username']
-    #         users.remove(user)
-    #         usernames = [user['username'] for user in users]
-    #         sio.emit('user_left', {'username': username, 'usernames': usernames})
-    #         print(f"User {username} disconnected with session ID {sid}")
-    #         break
-    # aes_keys.pop(sid, None)
-    global users
-    # Find the username associated with the sid
-    username = None
-    for user in users:
-        if user['sid'] == sid:
-            username = user['username']
-            break
+        @self.sio.event
+        def user_joined(sid, data):
+            # Finalize user join by binding username with sid and AES key
+            username = data.get('username', 'Unknown')
+            aes_key = self.aes_keys.pop(sid, None)
+            self.users.append({'sid': sid, 'username': username, 'aes_key': aes_key})
+            usernames = [user['username'] for user in self.users]
+            print(f"User {username} joined with session ID {sid}")
+            self.sio.emit('user_joined', {'username': username, 'usernames': usernames})
 
-    users = [user for user in users if user['sid'] != sid]
-    usernames = [user['username'] for user in users]
+        @self.sio.event
+        def user_left(sid, data):
+            # Remove user from list on leave event
+            username = data.get('username', 'Unknown')
+            self.users[:] = [user for user in self.users if user['sid'] != sid]
+            usernames = [user['username'] for user in self.users]
+            print(f"User {username} left with session ID {sid}")
+            self.sio.emit('user_left', {'username': username, 'usernames': usernames})
+            self.aes_keys.pop(sid, None)
 
-    if username:
-        sio.emit('user_left', {'username': username, 'usernames': usernames})
-        print(f"User {username} disconnected with session ID {sid}")
-    else:
-        sio.emit('user_left', {'username': 'Unknown', 'usernames': usernames})
-        print(f"Client disconnected: {sid}")
+        # --- Messaging ---
 
-    aes_keys.pop(sid, None)
+        @self.sio.event
+        def global_message(sid, data):
+            # Receive AES-encrypted global message, decrypt, re-encrypt for each user
+            sender = data.get('sender', 'Anonymous')
+            ciphertext = data.get('message', '')
+            sender_entry = next((u for u in self.users if u['sid'] == sid), None)
 
-# Current active user list (optional)
-@sio.event
-def get_current_users(sid):
-    usernames = [user['username'] for user in users]
-    return {'current_usernames': usernames}
+            if not sender_entry:
+                print("Sender not found.")
+                return
 
-# Global message forwarding (AES already encrypted, just relay)
-@sio.event
-def global_message(sid, data):
-    sender = data.get('sender', 'Anonymous')
-    ciphertext = data.get('message', '')
+            try:
+                plaintext = decrypt_aes(sender_entry['aes_key'], ciphertext)
+                print(f"[GLOBAL] From {sender}: {ciphertext}")
+            except Exception as e:
+                print(f"Failed to decrypt sender's message: {e}")
+                return
 
-    # Find sender's AES key
-    sender_entry = next((u for u in users if u['sid'] == sid), None)
-    if not sender_entry:
-        print("Sender not found.")
-        return
+            for user in self.users:
+                try:
+                    re_encrypted = encrypt_aes(user['aes_key'], plaintext)
+                    self.sio.emit('incoming_global_message', {'message': re_encrypted, 'sender': sender}, room=user['sid'])
+                except Exception as e:
+                    print(f"Failed to re-encrypt for {user['username']}: {e}")
 
-    try:
-        plaintext = decrypt_aes(sender_entry['aes_key'], ciphertext)
-        print(f"[GLOBAL] From {sender}: {ciphertext}")  
+        @self.sio.event
+        def private_message(sid, data):
+            # Receive AES-encrypted private message, re-encrypt for specific recipient
+            recipient_name = data.get('recipient', '')
+            ciphertext = data.get('message', '')
+            sender = data.get('sender', 'Anonymous')
 
-    except Exception as e:
-        print(f"Failed to decrypt sender's message: {e}")
-        return
+            sender_entry = next((u for u in self.users if u['sid'] == sid), None)
+            recipient_entry = next((u for u in self.users if u['username'] == recipient_name), None)
 
-    # Re-encrypt separately for each receiver
-    for user in users:
-        try:
-            re_encrypted = encrypt_aes(user['aes_key'], plaintext)
-            sio.emit('incoming_global_message', {'message': re_encrypted, 'sender': sender}, room=user['sid'])
-        except Exception as e:
-            print(f"Failed to re-encrypt for {user['username']}: {e}")
+            if not sender_entry or not recipient_entry:
+                print("Sender or recipient not found.")
+                return
 
-# Private message forwarding (AES already encrypted, just relay)
-@sio.event
-def private_message(sid, data):
-    recipient_name = data.get('recipient', '')
-    ciphertext = data.get('message', '')
-    sender = data.get('sender', 'Anonymous')
+            try:
+                plaintext = decrypt_aes(sender_entry['aes_key'], ciphertext)
+                print(f"[PRIVATE] From {sender} to {recipient_name}: {ciphertext}")
+                re_encrypted = encrypt_aes(recipient_entry['aes_key'], plaintext)
+                self.sio.emit('incoming_private_message', {'message': re_encrypted, 'sender': sender}, room=recipient_entry['sid'])
+            except Exception as e:
+                print(f"Failed private message forwarding: {e}")
 
-    sender_entry = next((u for u in users if u['sid'] == sid), None)
-    recipient_entry = next((u for u in users if u['username'] == recipient_name), None)
+        # --- User info ---
 
-    if not sender_entry or not recipient_entry:
-        print("Sender or recipient not found.")
-        return
+        @self.sio.event
+        def get_current_users(sid):
+            # Return current list of usernames
+            usernames = [user['username'] for user in self.users]
+            return {'current_usernames': usernames}
 
-    try:
-        plaintext = decrypt_aes(sender_entry['aes_key'], ciphertext)
-        print(f"[PRIVATE] From {sender} to {recipient_name}: {ciphertext}")  
-        re_encrypted = encrypt_aes(recipient_entry['aes_key'], plaintext)
-        sio.emit('incoming_private_message', {'message': re_encrypted, 'sender': sender}, room=recipient_entry['sid'])
-    except Exception as e:
-        print(f"Failed private message forwarding: {e}")
-
-# Start uploading file
-@sio.event
-def file_upload_start(sid, data):
-    pass
-
-# Start 
-@sio.event
-def file_upload_chunk(sid, data):
-    pass
-
-@sio.event
-def file_upload_finish(sid, data):
-    pass
-
-# Run server
+# --- Entry Point ---
 if __name__ == '__main__':
-    app.run(port=8080, debug=True)
-    # eventlet.wsgi.server(eventlet.listen(('localhost', 8080)), app)
+    server = ChatServer()
+    server.app.run(port=8080, debug=True)
