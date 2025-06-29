@@ -1,11 +1,19 @@
-from flask import Flask, render_template_string
 import socketio
 import sys
 import os
 import base64
+import eventlet
+
+from flask import Flask, render_template_string
+from crypto_utils import load_rsa_private_key, decrypt_rsa, decrypt_aes, encrypt_aes
 
 # Add parent directory to path for module import
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# File
+UPLOAD_FOLDER = "upload_files"
+CHUNK_SIZE = 4096 # 4 KB 
+os.makedirs(UPLOAD_FOLDER, exist_ok = True)
 
 class ChatServer:
     def __init__(self):
@@ -19,6 +27,9 @@ class ChatServer:
         self.aes_keys = {}       # Temporary AES key store: sid -> aes_key
         self.private_key = load_rsa_private_key("private_key.pem")  # Load RSA private key
 
+        # File transfer
+        self.upload_files = {}
+        
         self.setup_routes()
         self.register_events()
 
@@ -37,7 +48,6 @@ class ChatServer:
 
     def register_events(self):
         # --- Connection lifecycle ---
-
         @self.sio.event
         def connect(sid, environ):
             print(f"Client connected: {sid}")
@@ -62,7 +72,6 @@ class ChatServer:
                 self.sio.emit('user_left', {'username': 'Unknown', 'usernames': usernames})
 
         # --- Key exchange and user join/leave ---
-
         @self.sio.event
         def exchange_key(sid, data):
             # Decrypt and store AES key sent by client
@@ -96,7 +105,6 @@ class ChatServer:
             self.aes_keys.pop(sid, None)
 
         # --- Messaging ---
-
         @self.sio.event
         def global_message(sid, data):
             # Receive AES-encrypted global message, decrypt, re-encrypt for each user
@@ -145,14 +153,106 @@ class ChatServer:
                 print(f"Failed private message forwarding: {e}")
 
         # --- User info ---
-
         @self.sio.event
         def get_current_users(sid):
             # Return current list of usernames
             usernames = [user['username'] for user in self.users]
             return {'current_usernames': usernames}
+        
+        # --- File transfer: sending & receiving ---
+        @self.sio.event
+        def start_upload(sid, data):
+            filename = data.get('filename', '')
+            sender = data.get('sender', 'Anonymous')
+            # receiver = data.get('receiver', 'global')
 
+            path = os.path.join(UPLOAD_FOLDER, filename)
+
+            try:
+                file = open(path, 'wb')
+                self.upload_files[(sid, filename)] = file  # Track the file by sid
+                print(f"[Upload from {sender} to Server] Start: {filename}")
+            except Exception as e:
+                print(f"[start_upload] Failed to create file: {e}")
+                
+        # Send checks
+        @self.sio.event
+        def upload_chunk(sid, data):
+            # Decode the base64 to binary when server receives the chunks
+            chunk = base64.b64decode(data.get('chunk_data', None))
+            filename = data.get('filename', '')
+            
+            file = self.upload_files.get((sid, filename))
+            
+            if file:
+                try:
+                    file.write(chunk) # Write in the received file
+                    # print(f"[upload_chunk] Chunk received: {filename}")
+                    # file['content'].write(chuck)
+                except Exception as e:
+                    print(f"[upload_chunk] Failed to write chunk")
+                    
+        # Finish uploading file
+        @self.sio.event
+        def finish_upload(sid, data):
+            filename = data.get('filename', '')
+            sender = data.get('sender', 'Anonymous')
+            # receiver = data.get('receiver', 'global')
+            timestamp = data.get('time', '')
+                
+            file = self.upload_files.get((sid, filename))
+            if not file:
+                return
+            
+            try: 
+                file.close()
+                
+                print(f"[Upload from {sender} to Server] Finished upload {filename}")
+                
+                for user in self.users:
+                    # Notify 'file_ready' to all users
+                    # Global file
+                    self.sio.emit('file_ready', {
+                            'filename': filename,
+                            'sender': sender,
+                            'time': timestamp
+                    }, room=user['sid'])
+            except Exception as e:
+                print(f"[finish_upload] Failed to finalize file")
+            finally:
+                self.upload_files.pop((sid, filename), None)
+                
+        # Request download file
+        @self.sio.event
+        def download_request(sid, data):
+            filename = data.get('filename', '')
+            path = os.path.join(UPLOAD_FOLDER, filename)
+            
+            if not os.path.exists(path):
+                print(f"[download_request] File not found: {filename}")
+                return
+
+            # Send chunks to receiver
+            def send_chunks():
+                try:
+                    with open(path, 'rb') as file:
+                        while True:
+                            chunk = file.read(CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            encoded_data = base64.b64encode(chunk).decode()
+                            self.sio.emit('incoming_file_chunk', {
+                                    'chunk_data': encoded_data,
+                                    'filename': filename}, 
+                                    room=sid)
+                    self.sio.emit('finish_download', {'filename': filename}, room=sid)
+                except Exception as e:
+                    print(f"[send_chunks] Failed to send file: {e}")
+            
+            self.sio.start_background_task(send_chunks)
+        
 # --- Entry Point ---
 if __name__ == '__main__':
     server = ChatServer()
-    server.app.run(port=8080, debug=True)
+    # server.app.run(port=8080, debug=True)
+    eventlet.wsgi.server(eventlet.listen(('localhost', 8080)), server.app)
