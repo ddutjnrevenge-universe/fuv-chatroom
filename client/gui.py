@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 import os
+import base64
+import threading
+import socketio
+import sys
+import time
+import math
+
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from tkinter.ttk import Progressbar
-import base64
 from datetime import datetime
 from emoji_dict import EMOJI_DICT
-import threading
-import socketio
-import time
 
-import sys
-import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from server.crypto_utils import (
@@ -24,7 +25,7 @@ public_key = load_rsa_public_key("public_key.pem")
 
 FONT = "Helvetica"
 SERVER_API_URL = "http://localhost:8080"
-CHUNK_SIZE = 4096 # 4KB
+CHUNK_SIZE = 4000 # 4KB
 
 is_connecting = False
 connection_failed = False
@@ -51,12 +52,14 @@ class ChatClientGUI:
         self.username = None
         self.active_users = []
         
-        self.download_files = {}
-        
         # setup the socket client
         self.sio = socketio.Client()
         self.setup_socketio()
         # self.connect_to_server()
+        
+        # set up file transfer
+        self.download_files = {}
+        self.progress_n_index = {}
         
         self.login_screen()
         self.Window.mainloop()
@@ -136,8 +139,9 @@ class ChatClientGUI:
             timestamp = data.get("time", "")
             
             if sender == self.username:
-                self.success_display_file("Global", sender, filename, timestamp)
+                # self.success_display_file("Global", sender, filename, timestamp)
                 # self.display_download_button(filename)
+                pass
             else:
                 self.success_display_file("Global", f"From {sender}", filename, timestamp)
         
@@ -155,7 +159,8 @@ class ChatClientGUI:
             filename = data.get("filename", "")
             if filename in self.download_files:
                 threading.Thread(target=self.save_file, args=(filename,), daemon=True).start()
-                messagebox.showinfo("Download", f"Finish downloading {filename}.")
+                self.display_system_message(f"File {filename} has been successfully downloaded.")
+                # messagebox.showinfo("Download", f"Finish downloading {filename}.")
         
     def connect_to_server(self):
         def connect():
@@ -514,7 +519,7 @@ class ChatClientGUI:
         
         if filepath:
             f_size_bytes = os.path.getsize(filepath)
-            f_size_mb = f_size_bytes / (1024*1024)
+            f_size_mb = f_size_bytes / (1000*1000)
             
             extension = os.path.splitext(filepath)[1]
             extension = extension[1:].lower()
@@ -522,20 +527,23 @@ class ChatClientGUI:
             if extension in accept_extension:
                 if f_size_mb <= 25:
                     # self.display_system_message(f"Selected file: {filepath.split('/')[-1]}")
-                    threading.Thread(target=self.send_file, args=(filepath,), daemon=True).start()
+                    threading.Thread(target=self.send_file_w_progressbar, args=(filepath,), daemon=True).start()
                 else:
                     messagebox.showwarning("Warning", "Please choose a file smaller than 25 MB.")
             else:
                 messagebox.showwarning("Warning", "Inappropriate file type (not video, image, or audio)")
     
-    def send_file(self, path):   
-        # print(f"[DEBUG] Uploading {os.path.basename(path)} in thread: {threading.current_thread().name}")     
+    def send_file_w_progressbar(self, path):      
         try:
             filename = os.path.basename(path)
+            f_size_b = os.path.getsize(path)
             timestamp = datetime.now().strftime("%H:%M:%S")
             
-            self.display_system_message(f"File {filename} is uploading. Waiting for server confirmation...")
-            # self.display_message("Global", self.username, filename, timestamp)
+            chunk_num = 0
+            total_chunks = math.ceil(f_size_b/CHUNK_SIZE)
+            
+            # self.display_system_message(f"[Upload file] Waiting for server confirmation...")
+            self.display_progress_bar("Global", self.username, timestamp, filename)
             
             self.sio.emit('start_upload', {
                           'filename': filename,
@@ -552,6 +560,9 @@ class ChatClientGUI:
                                   'filename': filename,
                                   'chunk_data': encoded_data
                                  })
+                    chunk_num += 1
+                    # print("chunk_num", chunk_num)
+                    self.update_progress(filename, chunk_num, total_chunks)
                     # print(f"[DEBUG] Writing {threading.current_thread().name}, {filename}")
                     time.sleep(0.05)
                     
@@ -562,23 +573,65 @@ class ChatClientGUI:
                           'time': timestamp})
             
         except Exception as e:
-            messagebox.showerror("Error", "File transfer failed")
+            messagebox.showerror("Error", f"File transfer failed {e}")
     
-    # def process_display_file(self, msg_type, sender, timestamp, filename):
-        # def process_bar():
-        #     pass
+    def update_progress(self, filename, chunk_num, total_chunks):
+        try:
+            bar_info = self.progress_n_index.get(filename)
+            
+            if not bar_info:
+                return
+            
+            percent = math.floor((chunk_num/total_chunks) * 100)
+
+            if percent == 100:
+                self.chat_box.config(state="normal")
+                
+                progressbar_pos = bar_info["index"]
+
+                try:
+                    bar_info["bar"].destroy() # Remove the progress bar
+                    self.chat_box.delete(progressbar_pos) # Delete window element
+                except Exception as e:
+                    print(f"Error {e}")
+                
+                # Insert the download button
+                download_button = tk.Button(self.chat_box, text = "⬇", command = lambda : self.ask_download(filename), 
+                                    bg="midnight blue", fg="white", relief="flat", width= 2, 
+                                    padx=0, pady=0, font=(FONT, 11))
+                self.chat_box.window_create(progressbar_pos, window = download_button, pady=3)
+                
+                self.chat_box.config(state="disabled")
+                self.chat_box.yview(tk.END)
+                
+                self.progress_n_index.pop(filename, None)
+            else:
+                bar_info["bar"]["value"] = percent
+            
+        except Exception as e:
+            print(f"Cannot upload the progress bar of {filename}")
+    
+    def display_progress_bar(self, msg_type, sender, timestamp, filename):
+        self.chat_box.config(state="normal")
+        tag = "blue" if msg_type == "Global" else "orange"
+        formatted = f"({msg_type}) ({sender}) ({timestamp}): {filename} "
+        self.chat_box.insert(tk.END, formatted, tag)
         
-        # self.chat_box.config(state="normal")
-        # tag = "blue" if msg_type == "Global" else "orange"
-        # formatted = f"({msg_type}) ({sender}) ({timestamp}): {filename}"
-        # self.chat_box.insert(tk.END, formatted, tag)
+        # Add progress bar at the end of the file uploading announcement
+        bar = Progressbar(self.chat_box, orient = tk.HORIZONTAL, mode="determinate", maximum=100, length=50)
+        self.chat_box.window_create(tk.END, window=bar, pady=3)  
+
+        progressbar_pos = self.chat_box.index(bar)      
+        self.chat_box.insert(tk.END, "\n")
         
-        # bar = Progressbar(self.chat_box, orient = HORIZONTAL, length= 10)
+        self.chat_box.tag_config("blue", foreground="blue")
+        self.chat_box.tag_config("orange", foreground="darkorange")
         
-        # self.chat_box.tag_config("blue", foreground="blue")
-        # self.chat_box.tag_config("orange", foreground="darkorange")
-        # self.chat_box.config(state="disabled")
-        # self.chat_box.yview(tk.END)
+        # Store the position of the progress bar for later replacing with the download button
+        self.progress_n_index[filename] = {"index": progressbar_pos, 'bar': bar}
+        
+        self.chat_box.config(state="disabled")
+        self.chat_box.yview(tk.END)
     
     def save_file(self, filename):
         try:
@@ -599,20 +652,12 @@ class ChatClientGUI:
                 self.download_files[filename] = {'data': [], 'path': save_path}
                 self.sio.emit('download_request', {'filename': filename})
     
-    # def display_download_button(self, filename):
-    #     download_button = tk.Button(self.chat_box, text = "⬇", command = lambda : self.ask_download(filename), 
-    #                                 bg="midnight blue", fg="white", relief="flat", width= 2, 
-    #                                 padx=0, pady=0, font=(FONT, 11))
-    #     self.chat_box.window_create(tk.END, window = download_button, pady=3)
-    #     self.chat_box.insert(tk.END, "\n")
-    
-    def success_display_file(self, msg_type, sender, filename, timestamp):
+    def receive_file(self, msg_type, sender, filename, timestamp):
         self.chat_box.config(state="normal")
         tag = "blue" if msg_type == "Global" else "orange"
         formatted = f"({msg_type}) ({sender}) ({timestamp}): {filename} "
         self.chat_box.insert(tk.END, formatted, tag)
         
-        # self.display_download_button(filename)
         download_button = tk.Button(self.chat_box, text = "⬇", command = lambda : self.ask_download(filename), 
                                     bg="midnight blue", fg="white", relief="flat", width= 2, 
                                     padx=0, pady=0, font=(FONT, 11))
@@ -645,6 +690,9 @@ class ChatClientGUI:
 
         timestamp = datetime.now().strftime("%H:%M:%S")
 
+        if raw_msg.startswith("/filew "):
+            pass
+        
         if raw_msg.startswith("/w "):
             parts = raw_msg.split(maxsplit=2)
             if len(parts) >= 3:
