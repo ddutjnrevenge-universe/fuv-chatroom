@@ -159,18 +159,22 @@ class ChatServer:
             usernames = [user['username'] for user in self.users]
             return {'current_usernames': usernames}
         
-        # --- File transfer: sending & receiving ---
+        # --- File transfer: Public & Private ---
         @self.sio.event
         def start_upload(sid, data):
             filename = data.get('filename', '')
             sender = data.get('sender', 'Anonymous')
-            # receiver = data.get('receiver', 'global')
+            recipient = data.get('recipient', 'Global')
+            
+            if not recipient:
+                print("Recipient not found.")
+                return
 
             path = os.path.join(UPLOAD_FOLDER, filename)
 
             try:
                 file = open(path, 'wb')
-                self.upload_files[(sid, filename)] = file  # Track the file by sid
+                self.upload_files[(sid, filename, recipient)] = file  # Track the file by sid
                 print(f"[Upload from {sender} to Server] Start: {filename}")
             except Exception as e:
                 print(f"[start_upload] Failed to create file: {e}")
@@ -181,8 +185,9 @@ class ChatServer:
             # Decode the base64 to binary when server receives the chunks
             chunk = base64.b64decode(data.get('chunk_data', None))
             filename = data.get('filename', '')
+            recipient = data.get('recipient', 'Global')
             
-            file = self.upload_files.get((sid, filename))
+            file = self.upload_files.get((sid, filename, recipient))
             
             if file:
                 try:
@@ -197,32 +202,41 @@ class ChatServer:
         def finish_upload(sid, data):
             filename = data.get('filename', '')
             sender = data.get('sender', 'Anonymous')
-            # receiver = data.get('receiver', 'global')
+            recipient = data.get('recipient', 'Global')
             timestamp = data.get('time', '')
                 
-            file = self.upload_files.get((sid, filename))
+            file = self.upload_files.get((sid, filename, recipient))
             if not file:
                 return
             
             try: 
                 file.close()
-                
                 print(f"[Upload from {sender} to Server] Finished upload {filename}")
                 
-                for user in self.users:
-                    # Notify 'file_ready' to all users
-                    # Global file
-                    self.sio.emit('file_ready', {
-                            'filename': filename,
-                            'sender': sender,
-                            'time': timestamp
-                    }, room=user['sid'])
+                if recipient == "Global":
+                    for user in self.users:
+                        # Notify 'incoming_global_file' to all users
+                        # Global file
+                        self.sio.emit('incoming_global_file', {
+                                      'filename': filename,
+                                      'sender': sender,
+                                      'time': timestamp
+                        }, room=user['sid'])
+                else:
+                    recipient_entry = next((u for u in self.users if u['username'] == recipient), None)
+                    
+                    self.sio.emit('incoming_private_file', {
+                                  'filename': filename,
+                                  'sender': sender,
+                                  'time': timestamp
+                    }, room=recipient_entry['sid'])    
+                                
             except Exception as e:
                 print(f"[finish_upload] Failed to finalize file")
             finally:
                 self.upload_files.pop((sid, filename), None)
-                
-        # Request download file
+                        
+        # --- Request download file --- 
         @self.sio.event
         def download_request(sid, data):
             filename = data.get('filename', '')
