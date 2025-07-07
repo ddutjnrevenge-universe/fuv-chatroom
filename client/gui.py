@@ -133,7 +133,7 @@ class ChatClientGUI:
                 self.display_system_message(f"Failed to decrypt private message from {sender}")
         
         @self.sio.event
-        def file_ready(data):
+        def incoming_global_file(data):
             sender = data.get("sender", "Unknown")
             filename = data.get("filename", "")
             timestamp = data.get("time", "")
@@ -143,7 +143,15 @@ class ChatClientGUI:
                 # self.display_download_button(filename)
                 pass
             else:
-                self.success_display_file("Global", f"From {sender}", filename, timestamp)
+                self.receive_file("Global", f"From {sender}", filename, timestamp)
+        
+        @self.sio.event
+        def incoming_private_file(data):
+            sender = data.get("sender", "Unknown")
+            filename = data.get("filename", "")
+            timestamp = data.get("time", "")
+            
+            self.receive_file("Private", f"From {sender}", filename, timestamp)
         
         @self.sio.event
         def incoming_file_chunk(data):
@@ -305,13 +313,13 @@ class ChatClientGUI:
         # Suggestion label - moved to row 4 and spans both columns
         self.suggestion_label = tk.Label(
             self.Window,
-            text="Tip: Type '/w [username] [message]' to send a private message",
+            text="Tip: Type '/w [username] [message]' to send a private message \nType '/filew [username] [filepath]' to privately send a file",
             # text="Tip: Type '/w [username] [message]' to send a private message \n Type '/pfilew [username] [file path]' to send a private file\nType '/gfilew [username] [file path]' to send a global file",
             fg="#2E86C1",
             font=("Arial", 10, "italic")
         )
         self.suggestion_label.grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 5))
-        self.suggestion_label.grid_remove()     
+        self.suggestion_label.grid_remove()
 
         # Exit protocol
         self.Window.protocol("WM_DELETE_WINDOW", self.graceful_exit)   
@@ -512,8 +520,11 @@ class ChatClientGUI:
         except Exception as e:
             print(f"Error inserting emoji: {e}")
 
-    def select_file(self):
-        filepath = filedialog.askopenfilename()
+    def select_file(self, path = None, recipient = "Global"):
+        if recipient == "Global":
+            filepath = filedialog.askopenfilename()
+        else:
+            filepath = path
         
         accept_extension = ["mp4", "jpeg", "jpg", "mp3", "png"]
         
@@ -527,13 +538,16 @@ class ChatClientGUI:
             if extension in accept_extension:
                 if f_size_mb <= 25:
                     # self.display_system_message(f"Selected file: {filepath.split('/')[-1]}")
-                    threading.Thread(target=self.send_file_w_progressbar, args=(filepath,), daemon=True).start()
+                    if recipient == "Global":
+                        threading.Thread(target=self.send_file_w_progressbar, args=(filepath,), daemon=True).start()
+                    else:
+                        threading.Thread(target=self.send_file_w_progressbar, args=(filepath, recipient,), daemon=True).start()
                 else:
                     messagebox.showwarning("Warning", "Please choose a file smaller than 25 MB.")
             else:
                 messagebox.showwarning("Warning", "Inappropriate file type (not video, image, or audio)")
     
-    def send_file_w_progressbar(self, path):      
+    def send_file_w_progressbar(self, path, recipient = "Global"):      
         try:
             filename = os.path.basename(path)
             f_size_b = os.path.getsize(path)
@@ -543,11 +557,15 @@ class ChatClientGUI:
             total_chunks = math.ceil(f_size_b/CHUNK_SIZE)
             
             # self.display_system_message(f"[Upload file] Waiting for server confirmation...")
-            self.display_progress_bar("Global", self.username, timestamp, filename)
+            if recipient == "Global":
+                self.display_progress_bar("Global", self.username, timestamp, filename)
+            else:
+                self.display_progress_bar("Private", f"To {recipient}", timestamp, filename)
             
             self.sio.emit('start_upload', {
                           'filename': filename,
-                          'sender': self.username
+                          'sender': self.username, 
+                          'recipient': recipient
                          })
             
             with open(path, "rb") as file:
@@ -558,6 +576,7 @@ class ChatClientGUI:
                     encoded_data = base64.b64encode(chunk).decode()
                     self.sio.emit('upload_chunk', {
                                   'filename': filename,
+                                  'recipient': recipient,
                                   'chunk_data': encoded_data
                                  })
                     chunk_num += 1
@@ -569,7 +588,8 @@ class ChatClientGUI:
             time.sleep(0.5)
             self.sio.emit('finish_upload', {
                           'filename': filename, 
-                          'sender': self.username, 
+                          'sender': self.username,
+                          'recipient': recipient,
                           'time': timestamp})
             
         except Exception as e:
@@ -691,9 +711,14 @@ class ChatClientGUI:
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         if raw_msg.startswith("/filew "):
-            pass
+            parts = raw_msg.split(maxsplit=2)
+            
+            if len(parts) >= 3:
+                recipient = parts[1]
+                file_path = parts[2]
+                self.select_file(file_path, recipient)
         
-        if raw_msg.startswith("/w "):
+        elif raw_msg.startswith("/w "):
             parts = raw_msg.split(maxsplit=2)
             if len(parts) >= 3:
                 recipient = parts[1]
@@ -726,7 +751,6 @@ class ChatClientGUI:
 
         self.entry_var.set("")
 
-
     def display_message(self, msg_type, sender, message, timestamp):
         self.chat_box.config(state="normal")
         tag = "blue" if msg_type == "Global" else "orange"
@@ -750,7 +774,59 @@ class ChatClientGUI:
         self.chat_box.config(state="disabled")
         self.chat_box.yview(tk.END)
 
+    def private_sending_box(self, recipient):
+        self.private_box = tk.Toplevel()
+        setup_window(self.private_box, "Direct message", 300, 100)
+        self.private_box.resizable(False, False)
+        
+        # Blocking the main window, only interacting with the dialog
+        self.private_box.grab_set()
+        
+        # Configure the grid for padding and centering
+        self.private_box.columnconfigure(0, weight=1)
+        
+        # Add label
+        self.question = tk.Label(self.private_box, text=f"Sending to {recipient}", font=(FONT, 14))
+        self.question.grid(row=0, column=0, pady = 10)
 
+        # Button commands
+        def pfile():
+            file_path = filedialog.askopenfilename()
+            
+            if file_path:
+                self.select_file(file_path, recipient)
+                clear_n_exit()
+        
+        def pmessage():
+            clear_n_exit()
+        
+            text = f"/w {recipient} "
+            self.entry_var.set(text)
+            self.check_for_slash_command(None)
+            
+            current_pos = self.entry_box.index(tk.INSERT)
+            cursor_increment = len(text)
+            self.entry_box.icursor(current_pos + cursor_increment)
+            self.entry_box.focus()
+        
+        def clear_n_exit():
+            self.private_box.destroy()
+            self.user_list.selection_clear(0, tk.END)
+            self.user_list.activate(-1)                    # Remove active item
+            self.user_list.selection_anchor(0)             # Reset anchor
+        
+        self.button_frame = tk.Frame(self.private_box)
+        self.button_frame.grid(row=1, column=0, pady=(5, 10))
+        
+        self.private_file = tk.Button(self.button_frame, text="File", width=10, command=pfile)
+        self.private_file.grid(row=0, column=0, padx=5)
+        
+        self.private_message = tk.Button(self.button_frame, text="Message", width=10, command=pmessage)
+        self.private_message.grid(row=0, column=1, padx=5)
+        
+        # Exit
+        self.private_box.protocol("WM_DELETE_WINDOW", clear_n_exit)
+    
     # Event handler for user selection in the user list
     def on_user_selected(self, event):
         selected_indices = self.user_list.curselection()
@@ -759,8 +835,8 @@ class ChatClientGUI:
             value = self.user_list.get(index)
             username = value[2:].strip()
             print(f"User clicked: {username}")
-            self.entry_var.set(f"/w {username} ")
-            self.check_for_slash_command(None)
+            
+            self.private_sending_box(username)
 
     def update_user_list(self, users):
         if (not hasattr(self, 'user_list') or 
