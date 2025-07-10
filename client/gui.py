@@ -105,7 +105,10 @@ class ChatClientGUI:
 
         @self.sio.event
         def disconnect():
-            self.display_system_message("Disconnected from server.")
+            print("Disconnected from server.")
+            self.display_system_message("Disconnected from server. Exitting...")
+            self.Window.attributes("-disabled", True)
+            self.Window.after(5000, self.force_exit)
 
         @self.sio.event
         def incoming_global_message(data):
@@ -859,6 +862,15 @@ class ChatClientGUI:
             except:
                 pass
             self.Window.destroy()
+    
+    def force_exit(self):
+        """Force exit the application without confirmation."""
+        try:
+            if self.sio.connected:
+                self.sio.disconnect()
+        except:
+            pass
+        self.Window.destroy()
         
 if __name__ == "__main__":
     app = ChatClientGUI()
