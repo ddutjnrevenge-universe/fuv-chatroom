@@ -9,6 +9,7 @@ from crypto_utils import load_rsa_private_key, decrypt_rsa, decrypt_aes, encrypt
 
 # Add parent directory to path for module import
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from logs.db_logger import log_event
 
 # File
 UPLOAD_FOLDER = "upload_files"
@@ -51,6 +52,7 @@ class ChatServer:
         @self.sio.event
         def connect(sid, environ):
             print(f"Client connected: {sid}")
+            log_event("server", "connect", f"Client {sid} connected.")
 
         @self.sio.event
         def disconnect(sid):
@@ -66,9 +68,11 @@ class ChatServer:
 
             if username:
                 print(f"User {username} disconnected ({sid})")
+                log_event("server", "disconnect", f"User {username} disconnected ({sid})")
                 self.sio.emit('user_left', {'username': username, 'usernames': usernames})
             else:
                 print(f"Client disconnected: {sid}")
+                log_event("server", "disconnect", f"Client disconnected: {sid}")
                 self.sio.emit('user_left', {'username': 'Unknown', 'usernames': usernames})
 
         # --- Key exchange and user join/leave ---
@@ -81,8 +85,10 @@ class ChatServer:
                 aes_key = decrypt_rsa(self.private_key, encrypted_aes)
                 self.aes_keys[sid] = aes_key
                 print(f"[Key Exchange] AES key received for client {sid}")
+                log_event("server", "exchange_key", f"[Key Exchange] AES key received for client {sid}")
             except Exception as e:
                 print(f"[Key Exchange] Failed: {e}")
+                log_event("server", "exchange_key_failed", f"[Key Exchange] Failed: {e}")
 
         @self.sio.event
         def user_joined(sid, data):
@@ -92,6 +98,7 @@ class ChatServer:
             self.users.append({'sid': sid, 'username': username, 'aes_key': aes_key})
             usernames = [user['username'] for user in self.users]
             print(f"User {username} joined with session ID {sid}")
+            log_event("server", "user_joined", f"User '{username}' joined (SID: {sid})")
             self.sio.emit('user_joined', {'username': username, 'usernames': usernames})
 
         @self.sio.event
@@ -101,6 +108,7 @@ class ChatServer:
             self.users[:] = [user for user in self.users if user['sid'] != sid]
             usernames = [user['username'] for user in self.users]
             print(f"User {username} left with session ID {sid}")
+            log_event("server", "user_left", f"User {username} left with session ID {sid}")
             self.sio.emit('user_left', {'username': username, 'usernames': usernames})
             self.aes_keys.pop(sid, None)
 
@@ -114,13 +122,16 @@ class ChatServer:
 
             if not sender_entry:
                 print("Sender not found.")
+                log_event("server", "global_msg", "Sender not found.")
                 return
 
             try:
                 plaintext = decrypt_aes(sender_entry['aes_key'], ciphertext)
                 print(f"[GLOBAL] From {sender}: {ciphertext}")
+                log_event("server", "global_msg", f"[GLOBAL] From {sender}: {ciphertext}")
             except Exception as e:
                 print(f"Failed to decrypt sender's message: {e}")
+                log_event("server", "global_msg", f"Failed to decrypt sender's message: {e}")
                 return
 
             for user in self.users:
@@ -129,6 +140,7 @@ class ChatServer:
                     self.sio.emit('incoming_global_message', {'message': re_encrypted, 'sender': sender}, room=user['sid'])
                 except Exception as e:
                     print(f"Failed to re-encrypt for {user['username']}: {e}")
+                    log_event("server", "global_msg", f"Failed to re-encrypt for {user['username']}: {e}")
 
         @self.sio.event
         def private_message(sid, data):
@@ -142,15 +154,18 @@ class ChatServer:
 
             if not sender_entry or not recipient_entry:
                 print("Sender or recipient not found.")
+                log_event("server", "private_msg", "Sender or recipient not found.")
                 return
 
             try:
                 plaintext = decrypt_aes(sender_entry['aes_key'], ciphertext)
                 print(f"[PRIVATE] From {sender} to {recipient_name}: {ciphertext}")
+                log_event("server", "private_msg", f"[PRIVATE] From {sender} to {recipient_name}: {ciphertext}")
                 re_encrypted = encrypt_aes(recipient_entry['aes_key'], plaintext)
                 self.sio.emit('incoming_private_message', {'message': re_encrypted, 'sender': sender}, room=recipient_entry['sid'])
             except Exception as e:
                 print(f"Failed private message forwarding: {e}")
+                log_event("server", "private_msg", f"Failed private message forwarding: {e}")
 
         # --- User info ---
         @self.sio.event
@@ -168,6 +183,7 @@ class ChatServer:
             
             if not recipient:
                 print("Recipient not found.")
+                log_event("server", "start_upload", "Recipient not found.")
                 return
 
             path = os.path.join(UPLOAD_FOLDER, filename)
@@ -176,8 +192,10 @@ class ChatServer:
                 file = open(path, 'wb')
                 self.upload_files[(sid, filename, recipient)] = file  # Track the file by sid
                 print(f"[Upload from {sender} to Server] Start: {filename}")
+                log_event("server", "start_upload", f"Start upload: {filename} from {sender} to {recipient}")
             except Exception as e:
                 print(f"[start_upload] Failed to create file: {e}")
+                log_event("server", "start_upload", f"Failed to create file: {e}")
                 
         # Send checks
         @self.sio.event
@@ -196,6 +214,7 @@ class ChatServer:
                     # file['content'].write(chuck)
                 except Exception as e:
                     print(f"[upload_chunk] Failed to write chunk")
+                    log_event("server", "upload_chunk_failed", f"Failed to write chunk for {filename}: {e}")
                     
         # Finish uploading file
         @self.sio.event
@@ -212,6 +231,7 @@ class ChatServer:
             try: 
                 file.close()
                 print(f"[Upload from {sender} to Server] Finished upload {filename}")
+                log_event("server", "finish_upload", f"Finished upload: {filename} from {sender} to {recipient} at {timestamp}")
                 
                 if recipient == "Global":
                     for user in self.users:
@@ -233,6 +253,7 @@ class ChatServer:
                                 
             except Exception as e:
                 print(f"[finish_upload] Failed to finalize file")
+                log_event("server", "finish_upload_failed", f"Failed to finalize file {filename}: {e}")
             finally:
                 self.upload_files.pop((sid, filename), None)
                         
@@ -244,6 +265,7 @@ class ChatServer:
             
             if not os.path.exists(path):
                 print(f"[download_request] File not found: {filename}")
+                log_event("server", "download_request_failed", f"File not found: {filename}")
                 return
 
             # Send chunks to receiver
@@ -262,6 +284,7 @@ class ChatServer:
                     self.sio.emit('finish_download', {'filename': filename}, room=sid)
                 except Exception as e:
                     print(f"[send_chunks] Failed to send file: {e}")
+                    log_event("server", "send_chunks_failed", f"Failed to send file {filename}: {e}")
             
             self.sio.start_background_task(send_chunks)
         

@@ -14,6 +14,7 @@ from datetime import datetime
 from emoji_dict import EMOJI_DICT
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from logs.db_logger import log_event
 
 from server.crypto_utils import (
     load_rsa_public_key, encrypt_rsa, generate_aes_key,
@@ -68,6 +69,8 @@ class ChatClientGUI:
         @self.sio.event
         def connect():
             print("Connected to server.")
+            log_event("client", "connect", "Connected to server.")
+            
 
             # # After connection, generate AES key & exchange
             self.session_aes_key = generate_aes_key()
@@ -79,6 +82,7 @@ class ChatClientGUI:
         def current_users(data):
             usernames = data.get('usernames', [])
             print(f"Current usernames: {usernames}")
+            log_event("client", "current_users", f"Received current users: {usernames}")
             self.active_users = usernames
             # self.update_user_list(users)
 
@@ -106,6 +110,7 @@ class ChatClientGUI:
         @self.sio.event
         def disconnect():
             print("Disconnected from server.")
+            log_event("client", "disconnect", "Disconnected from server.")
             self.display_system_message("Disconnected from server. Exitting...")
             self.Window.attributes("-disabled", True)
             self.Window.after(5000, self.force_exit)
@@ -180,6 +185,7 @@ class ChatClientGUI:
                 self.sio.wait()
             except Exception as e:
                 print(f"Connection failed: {e}")
+                log_event("client", "connect_to_server_error", f"Connection failed: {e}")
         threading.Thread(target=connect, daemon=True).start()
 
     def update_user_server(self):
@@ -242,6 +248,7 @@ class ChatClientGUI:
     def login_screen(self):
         self.connect_to_server()
         print("Connecting to server...")
+        log_event("client", "login_screen", "Attempting to connect to server...")
         while (not self.sio.connected):
             continue
 
@@ -390,10 +397,10 @@ class ChatClientGUI:
         
         self.populate_emoji_tab(symbols_tab, [
             "🩷", "🧡", "💛", "💚", "💙", "🩵", "💜", "🤎", "🖤", "🩶", "🤍", "💔",
-            "❣️", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟", "💌", "💢", "💥", 
-            "💤", "💦", "💨", "💫", "🕳️", "🅰️", "🅱️", "🆎", "🆑", "🅾️", "🆘", "⛔", 
+            "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟", "💌", "💢", "💥", 
+            "💤", "💦", "💨", "💫", "🆎", "🆘", "⛔", 
             "🛑", "📛", "❌", "⭕", "🚫", "🔇", "🔕", "🚭", "🚷", "🚯", "🚳", "🚱", 
-            "🔞", "📵", "❗", "❕", "❓", "❔", "‼️", "⁉️", "💯", "✅", "❎"
+            "🔞", "📵", "❗", "❓", "💯", "✅", "❎"
         ])
         
         # # Add search functionality
@@ -522,6 +529,7 @@ class ChatClientGUI:
                 
         except Exception as e:
             print(f"Error inserting emoji: {e}")
+            log_event("client", "insert_emoji_error", f"Error inserting emoji: {e}")
 
     def select_file(self, path = None, recipient = "Global"):
         if recipient == "Global":
@@ -617,6 +625,7 @@ class ChatClientGUI:
                     self.chat_box.delete(progressbar_pos) # Delete window element
                 except Exception as e:
                     print(f"Error {e}")
+                    log_event("client", "progress_bar_error", f"Error destroying progress bar for {filename}: {e}")
                 
                 # Insert the download button
                 download_button = tk.Button(self.chat_box, text = "⬇", command = lambda : self.ask_download(filename), 
@@ -633,6 +642,7 @@ class ChatClientGUI:
             
         except Exception as e:
             print(f"Cannot upload the progress bar of {filename}")
+            log_event("client", "progress_bar_update_error", f"Cannot update progress bar for {filename}: {e}")
     
     def display_progress_bar(self, msg_type, sender, timestamp, filename):
         self.chat_box.config(state="normal")
@@ -767,6 +777,7 @@ class ChatClientGUI:
     def display_system_message(self, message):
         if not hasattr(self, 'chat_box'):
             print("Chat box not initialized.")
+            log_event("client", "display_system_message_error", "Chat box not initialized.")
             return
         
         self.chat_box.config(state="normal")
@@ -838,6 +849,7 @@ class ChatClientGUI:
             value = self.user_list.get(index)
             username = value[2:].strip()
             print(f"User clicked: {username}")
+            log_event("client", "user_selected", f"User selected: {username}")
             
             self.private_sending_box(username)
 
@@ -847,6 +859,7 @@ class ChatClientGUI:
             not isinstance(users, list)
         ):
             print("User list not initialized or invalid users data.")
+            log_event("client", "update_user_list_error", "User list not initialized or invalid users data.")
             return
         
         # Clear the current list
