@@ -3,6 +3,7 @@ import sys
 import os
 import base64
 import eventlet
+import hashlib
 
 from flask import Flask, render_template_string
 from crypto_utils import load_rsa_private_key, decrypt_rsa, decrypt_aes, encrypt_aes
@@ -13,7 +14,7 @@ from logs.db_logger import log_event
 
 # File
 UPLOAD_FOLDER = "upload_files"
-CHUNK_SIZE = 4096 # 4 KB 
+CHUNK_SIZE = 65536 # 64KB 
 os.makedirs(UPLOAD_FOLDER, exist_ok = True)
 
 class ChatServer:
@@ -190,7 +191,12 @@ class ChatServer:
 
             try:
                 file = open(path, 'wb')
-                self.upload_files[(sid, filename, recipient)] = file  # Track the file by sid
+                hash_algo = hashlib.sha256()
+                
+                # self.upload_files[(sid, filename, recipient)] = file  # Track the file by sid
+                self.upload_files[(sid, filename, recipient)] = {"file": file, 
+                                                                 "hash_compare": hash_algo}
+                
                 print(f"[Upload from {sender} to Server] Start: {filename}")
                 log_event("server", "start_upload", f"Start upload: {filename} from {sender} to {recipient}")
             except Exception as e:
@@ -205,11 +211,17 @@ class ChatServer:
             filename = data.get('filename', '')
             recipient = data.get('recipient', 'Global')
             
-            file = self.upload_files.get((sid, filename, recipient))
+            file_info = self.upload_files.get((sid, filename, recipient))
+            if not file_info:
+                return
+            
+            file = file_info['file']
+            hash_compare = file_info['hash_compare']
             
             if file:
                 try:
                     file.write(chunk) # Write in the received file
+                    hash_compare.update(chunk)
                     # print(f"[upload_chunk] Chunk received: {filename}")
                     # file['content'].write(chuck)
                 except Exception as e:
@@ -222,14 +234,36 @@ class ChatServer:
             filename = data.get('filename', '')
             sender = data.get('sender', 'Anonymous')
             recipient = data.get('recipient', 'Global')
+            client_hash = data.get('hash_file', '')
             timestamp = data.get('time', '')
                 
-            file = self.upload_files.get((sid, filename, recipient))
-            if not file:
+            file_info = self.upload_files.get((sid, filename, recipient))
+            if not file_info:
                 return
             
             try: 
-                file.close()
+                file_info['file'].close()
+                computed_hash = file_info['hash_compare'].hexdigest()
+                
+                if computed_hash != client_hash:
+                    print(f"[finish_upload] Hash mismatch: expected {client_hash}, got {computed_hash}")
+                    log_event("server", "finish_upload_failed", f"Hash mismatch for {filename}")
+                    
+                    # Construct full path to the file
+                    file_path = os.path.join(UPLOAD_FOLDER, filename)  # Replace UPLOAD_FOLDER with your actual directory variable
+                    
+                    # # Delete the file if it exists
+                    # if os.path.exists(file_path):
+                    #     os.remove(file_path)
+                    #     print(f"[finish_upload] Deleted corrupt file: {file_path}")
+                    #     log_event("server", "delete_file_upload_failed", f"[finish_upload] Deleted corrupt file: {file_path}")
+                                    
+                    self.sio.emit('retry_sending', {
+                        'filename': filename,
+                        'sender': sender
+                    })
+                    return
+                
                 print(f"[Upload from {sender} to Server] Finished upload {filename}")
                 log_event("server", "finish_upload", f"Finished upload: {filename} from {sender} to {recipient} at {timestamp}")
                 
@@ -268,6 +302,7 @@ class ChatServer:
                 log_event("server", "download_request_failed", f"File not found: {filename}")
                 return
 
+            print(f"Start to downloading {filename}")
             # Send chunks to receiver
             def send_chunks():
                 try:

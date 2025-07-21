@@ -9,3 +9,6 @@ flask
 cryptography
 eventlet
 flask-socketio
+
+# both
+hashlib
