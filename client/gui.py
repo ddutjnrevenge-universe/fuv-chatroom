@@ -7,6 +7,7 @@ import sys
 import time
 import math
 import hashlib
+from queue import Queue
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -71,7 +72,6 @@ class ChatClientGUI:
         def connect():
             print("Connected to server.")
             log_event("client", "connect", "Connected to server.")
-            
 
             # # After connection, generate AES key & exchange
             self.session_aes_key = generate_aes_key()
@@ -168,14 +168,15 @@ class ChatClientGUI:
             filename = data.get("filename", "")
             
             if chunk_data:
-                decoded = base64.b64decode(chunk_data.encode())
-                self.download_files[filename]['data'].append(decoded)
+                self.download_files[filename]['queue'].put(chunk_data) # Append encoded data to queue
                         
         @self.sio.event
         def finish_download(data):
+            time.sleep(0.2)
             filename = data.get("filename", "")
+            
             if filename in self.download_files:
-                threading.Thread(target=self.save_file, args=(filename,), daemon=True).start()
+                self.download_files[filename]['queue'].put(None)
                 self.display_system_message(f"File {filename} has been successfully downloaded.")
                 # messagebox.showinfo("Download", f"Finish downloading {filename}.")
         
@@ -187,7 +188,7 @@ class ChatClientGUI:
             if sender == self.username:
                 messagebox.showerror("Error", f"File upload to server failed for '{filename}'. Please try resending the file.")
                 self.error_upload(filename)
-        
+    
     def connect_to_server(self):
         def connect():
             try:
@@ -717,24 +718,36 @@ class ChatClientGUI:
         self.chat_box.config(state="disabled")
         self.chat_box.yview(tk.END)
     
-    def save_file(self, filename):
-        try:
-            saving_file = self.download_files.get(filename)
-            # print(saving_file['path'])
-            with open(saving_file['path'], "wb") as file:
-                for chunk in saving_file['data']:
-                    file.write(chunk)
-            
-        except Exception as e:
-            messagebox.showerror("Error", "Error saving file")
-        finally:
-            self.download_files.pop(filename, None)
+    def save_file_stream(self, filename):
+        file_path = self.download_files[filename]['path']
+        queue = self.download_files[filename]['queue']
+        
+        with open(file_path, "wb") as f:
+            while True:
+                chunk = queue.get()
+                if chunk is None:  # Poison pill
+                    break
+                decoded_chunk = base64.b64decode(chunk.encode())
+                f.write(decoded_chunk)
+        self.download_files.pop(filename)
     
     def ask_download(self, filename):
         if messagebox.askyesno("Download", f"Do you want to download {filename}?"):
+            extension = os.path.splitext(filename)[1]  # get original file extension
             save_path = filedialog.asksaveasfilename(title="Save As", initialfile=filename)
+            
             if save_path:
-                self.download_files[filename] = {'data': [], 'path': save_path}
+                if not save_path.lower().endswith(extension.lower()):
+                    save_path += extension  # auto-append if user forgot
+                    
+                q = Queue()
+                self.download_files[filename] = {
+                    'queue': q,
+                    'path': save_path,
+                    'thread': threading.Thread(target=self.save_file_stream, args=(filename,), daemon=True)
+                }
+                
+                self.download_files[filename]['thread'].start()
                 self.sio.emit('download_request', {'filename': filename})
     
     def receive_file(self, msg_type, sender, filename, timestamp):
