@@ -6,6 +6,8 @@ import socketio
 import sys
 import time
 import math
+import hashlib
+from queue import Queue
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -26,7 +28,7 @@ public_key = load_rsa_public_key("public_key.pem")
 
 FONT = "Helvetica"
 SERVER_API_URL = "http://localhost:8080"
-CHUNK_SIZE = 4000 # 4KB
+CHUNK_SIZE = 49152 # 48KB
 
 is_connecting = False
 connection_failed = False
@@ -61,6 +63,7 @@ class ChatClientGUI:
         # set up file transfer
         self.download_files = {}
         self.progress_n_index = {}
+        self.upload_confirmation = {}
         
         self.login_screen()
         self.Window.mainloop()
@@ -70,7 +73,6 @@ class ChatClientGUI:
         def connect():
             print("Connected to server.")
             log_event("client", "connect", "Connected to server.")
-            
 
             # # After connection, generate AES key & exchange
             self.session_aes_key = generate_aes_key()
@@ -167,17 +169,45 @@ class ChatClientGUI:
             filename = data.get("filename", "")
             
             if chunk_data:
-                decoded = base64.b64decode(chunk_data.encode())
-                self.download_files[filename]['data'].append(decoded)
+                self.download_files[filename]['queue'].put(chunk_data) # Append encoded data to queue
                         
         @self.sio.event
         def finish_download(data):
+            time.sleep(0.5)
             filename = data.get("filename", "")
+            server_hash = data.get("hash_file", "")
+            
             if filename in self.download_files:
-                threading.Thread(target=self.save_file, args=(filename,), daemon=True).start()
-                self.display_system_message(f"File {filename} has been successfully downloaded.")
-                # messagebox.showinfo("Download", f"Finish downloading {filename}.")
+                computed_hash = self.download_files[filename]['computed_hash'].hexdigest()
+                saving_path = self.download_files[filename]['path']
+                
+                if computed_hash != server_hash:
+                    messagebox.showerror("Error", f"Failed to download file {filename} from server. Please download again.")
+                    log_event("client", "finish_download_failed", f"Hash mismatch for {filename}")
+                    
+                    # Delete the failed file
+                    if os.path.exists(saving_path):
+                        os.remove(saving_path)
+                        log_event("client", "delete_failed_download_file", f"Deleted corrupt file: {saving_path}")
+                else:
+                    self.download_files[filename]['queue'].put(None)
+                    self.display_system_message(f"File {filename} has been successfully downloaded.")
         
+        @self.sio.event
+        def retry_sending(data):
+            filename = data.get("filename", "")
+            sender = data.get("sender", "Unknown")
+            
+            if sender == self.username:
+                # Cancel success timer if it's still pending
+                if filename in self.upload_confirmation:
+                    self.root.after_cancel(self.upload_confirmation[filename])
+                    self.upload_confirmation.pop(filename, None)
+                
+                # Display the error
+                messagebox.showerror("Error", f"File upload to server failed for '{filename}'. Please try resending the file.")
+                self.error_upload(filename)
+    
     def connect_to_server(self):
         def connect():
             try:
@@ -550,24 +580,29 @@ class ChatClientGUI:
         accept_extension = ["mp4", "jpeg", "jpg", "mp3", "png"]
         
         if filepath:
-            f_size_bytes = os.path.getsize(filepath)
-            f_size_mb = f_size_bytes / (1000*1000)
-            
-            extension = os.path.splitext(filepath)[1]
-            extension = extension[1:].lower()
+            try: 
+                f_size_bytes = os.path.getsize(filepath)
+                f_size_mb = f_size_bytes / (1000*1000)
+                
+                extension = os.path.splitext(filepath)[1]
+                extension = extension[1:].lower()
 
-            if extension in accept_extension:
-                if f_size_mb <= 25:
-                    # self.display_system_message(f"Selected file: {filepath.split('/')[-1]}")
-                    if recipient == "Global":
-                        threading.Thread(target=self.send_file_w_progressbar, args=(filepath,), daemon=True).start()
+                if extension in accept_extension:
+                    if f_size_mb <= 25:
+                        # self.display_system_message(f"Selected file: {filepath.split('/')[-1]}")
+                        if recipient == "Global":
+                            threading.Thread(target=self.send_file_w_progressbar, args=(filepath,), daemon=True).start()
+                        else:
+                            threading.Thread(target=self.send_file_w_progressbar, args=(filepath, recipient,), daemon=True).start()
                     else:
-                        threading.Thread(target=self.send_file_w_progressbar, args=(filepath, recipient,), daemon=True).start()
+                        messagebox.showwarning("Warning", "Please choose a file smaller than 20 MB.")
                 else:
-                    messagebox.showwarning("Warning", "Please choose a file smaller than 25 MB.")
-            else:
-                messagebox.showwarning("Warning", "Inappropriate file type (not video, image, or audio)")
-    
+                    messagebox.showwarning("Warning", "Inappropriate file type (not video, image, or audio)")
+                    log_event("client", "select_file_error", f"Incorrect file type error: {extension}")
+            
+            except Exception as e:
+                messagebox.showerror("Error", "Inappropriate file path")    
+            
     def send_file_w_progressbar(self, path, recipient = "Global"):      
         try:
             filename = os.path.basename(path)
@@ -576,6 +611,9 @@ class ChatClientGUI:
             
             chunk_num = 0
             total_chunks = math.ceil(f_size_b/CHUNK_SIZE)
+            
+            # Hashing file
+            hash_algo = hashlib.sha256()
             
             # self.display_system_message(f"[Upload file] Waiting for server confirmation...")
             if recipient == "Global":
@@ -594,6 +632,8 @@ class ChatClientGUI:
                     chunk = file.read(CHUNK_SIZE)
                     if not chunk:
                         break
+                    hash_algo.update(chunk)
+
                     encoded_data = base64.b64encode(chunk).decode()
                     self.sio.emit('upload_chunk', {
                                   'filename': filename,
@@ -601,7 +641,6 @@ class ChatClientGUI:
                                   'chunk_data': encoded_data
                                  })
                     chunk_num += 1
-                    # print("chunk_num", chunk_num)
                     self.update_progress(filename, chunk_num, total_chunks)
                     # print(f"[DEBUG] Writing {threading.current_thread().name}, {filename}")
                     time.sleep(0.05)
@@ -611,10 +650,41 @@ class ChatClientGUI:
                           'filename': filename, 
                           'sender': self.username,
                           'recipient': recipient,
+                          'hash_file': hash_algo.hexdigest(),
                           'time': timestamp})
+            print(hash_algo.hexdigest())
             
         except Exception as e:
             messagebox.showerror("Error", f"File transfer failed {e}")
+    
+    def error_upload(self, filename):
+        try:
+            bar_info = self.progress_n_index.get(filename)
+            
+            if not bar_info:
+                return
+            
+            self.chat_box.config(state="normal")    
+            progressbar_pos = bar_info["index"]
+            
+            try:
+                bar_info["bar"].destroy() # Remove the progress bar
+                self.chat_box.delete(progressbar_pos) # Delete window element
+                
+                # Insert error text at the same index
+                self.chat_box.insert(progressbar_pos, "❌ Error\n")
+            except Exception as e:
+                print(f"Error {e}")
+                log_event("client", "progress_bar_error", f"Error destroying progress bar for {filename}: {e}")
+            
+            self.chat_box.config(state="disabled")
+            self.chat_box.yview(tk.END)
+            
+            self.progress_n_index.pop(filename, None)
+            
+        except Exception as e:
+            print("Cannot display the upload error.")
+            log_event("client", "error_upload_error", f"Cannot display the upload error for {filename}: {e}") 
     
     def update_progress(self, filename, chunk_num, total_chunks):
         try:
@@ -629,24 +699,34 @@ class ChatClientGUI:
                 self.chat_box.config(state="normal")
                 
                 progressbar_pos = bar_info["index"]
+                
+                def finalize_upload():
+                    # Check if retry was already triggered
+                    if filename not in self.upload_confirmation:
+                        return  # already handled
 
-                try:
-                    bar_info["bar"].destroy() # Remove the progress bar
-                    self.chat_box.delete(progressbar_pos) # Delete window element
-                except Exception as e:
-                    print(f"Error {e}")
-                    log_event("client", "progress_bar_error", f"Error destroying progress bar for {filename}: {e}")
+                    try:
+                        bar_info["bar"].destroy() # Remove the progress bar
+                        self.chat_box.delete(progressbar_pos) # Delete window element
+                    except Exception as e:
+                        print(f"Error {e}")
+                        log_event("client", "progress_bar_error", f"Error destroying progress bar for {filename}: {e}")
+                    
+                    # Insert the download button
+                    download_button = tk.Button(self.chat_box, text = "⬇", command = lambda : self.ask_download(filename), 
+                                        bg="midnight blue", fg="white", relief="flat", width= 2, 
+                                        padx=0, pady=0, font=(FONT, 11))
+                    self.chat_box.window_create(progressbar_pos, window = download_button, pady=3)
+                    
+                    self.chat_box.config(state="disabled")
+                    self.chat_box.yview(tk.END)
+                    
+                    self.progress_n_index.pop(filename, None)
+                    self.upload_confirmation.pop(filename, None)
                 
-                # Insert the download button
-                download_button = tk.Button(self.chat_box, text = "⬇", command = lambda : self.ask_download(filename), 
-                                    bg="midnight blue", fg="white", relief="flat", width= 2, 
-                                    padx=0, pady=0, font=(FONT, 11))
-                self.chat_box.window_create(progressbar_pos, window = download_button, pady=3)
-                
-                self.chat_box.config(state="disabled")
-                self.chat_box.yview(tk.END)
-                
-                self.progress_n_index.pop(filename, None)
+                # Only check the first time progress reaches 100% -> only schedule once
+                if filename not in self.upload_confirmation:
+                    self.upload_confirmation[filename] = self.root.after(2000, finalize_upload) # Delay 2s to wait for 'retry_sending' signal from server
             else:
                 bar_info["bar"]["value"] = percent
             
@@ -676,23 +756,49 @@ class ChatClientGUI:
         self.chat_box.config(state="disabled")
         self.chat_box.yview(tk.END)
     
-    def save_file(self, filename):
+    def save_file_stream(self, filename):
+        file_path = self.download_files[filename]['path']
+        queue = self.download_files[filename]['queue']
+        computed_hash = self.download_files[filename]['computed_hash']
+        
         try:
-            saving_file = self.download_files.get(filename)
-            # print(saving_file['path'])
-            with open(saving_file['path'], "wb") as file:
-                for chunk in saving_file['data']:
-                    file.write(chunk)
+            with open(file_path, "wb") as f:
+                while True:
+                    chunk = queue.get()
+                    if chunk is None:  # Poison pill
+                        break
+                    
+                    decoded_chunk = base64.b64decode(chunk.encode())
+                    
+                    f.write(decoded_chunk)
+                    computed_hash.update(decoded_chunk)
         except Exception as e:
-            messagebox.showerror("Error", "Error saving file")
+            messagebox.showerror("Error", "Failed to write chunk when downloading.")
+            log_event("client", "save_file_stream_failed", f"Failed to write chunk when downloading {filename}: {e}")
         finally:
-            self.download_files.pop(filename, None)
+            self.download_files.pop(filename)
     
     def ask_download(self, filename):
         if messagebox.askyesno("Download", f"Do you want to download {filename}?"):
+            extension = os.path.splitext(filename)[1]  # get original file extension
             save_path = filedialog.asksaveasfilename(title="Save As", initialfile=filename)
+            
             if save_path:
-                self.download_files[filename] = {'data': [], 'path': save_path}
+                if not save_path.lower().endswith(extension.lower()):
+                    save_path += extension  # auto-append if user forgot
+                    
+                q = Queue()
+                hash_algo_download = hashlib.sha256()
+                
+                self.download_files[filename] = {
+                    'queue': q,
+                    'path': save_path,
+                    'thread': threading.Thread(target=self.save_file_stream, args=(filename,), daemon=True),
+                    'computed_hash': hash_algo_download
+                }
+
+                self.download_files[filename]['thread'].start()
+                
                 self.sio.emit('download_request', {'filename': filename})
     
     def receive_file(self, msg_type, sender, filename, timestamp):
