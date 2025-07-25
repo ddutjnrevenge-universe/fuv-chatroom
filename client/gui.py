@@ -172,13 +172,25 @@ class ChatClientGUI:
                         
         @self.sio.event
         def finish_download(data):
-            time.sleep(0.2)
+            time.sleep(0.5)
             filename = data.get("filename", "")
+            server_hash = data.get("hash_file", "")
             
             if filename in self.download_files:
-                self.download_files[filename]['queue'].put(None)
-                self.display_system_message(f"File {filename} has been successfully downloaded.")
-                # messagebox.showinfo("Download", f"Finish downloading {filename}.")
+                computed_hash = self.download_files[filename]['computed_hash'].hexdigest()
+                saving_path = self.download_files[filename]['path']
+                
+                if computed_hash != server_hash:
+                    messagebox.showerror("Error", f"Failed to download file {filename} from server. Please download again.")
+                    log_event("client", "finish_download_failed", f"Hash mismatch for {filename}")
+                    
+                    # Delete the failed file
+                    if os.path.exists(saving_path):
+                        os.remove(saving_path)
+                        log_event("client", "delete_failed_download_file", f"Deleted corrupt file: {saving_path}")
+                else:
+                    self.download_files[filename]['queue'].put(None)
+                    self.display_system_message(f"File {filename} has been successfully downloaded.")
         
         @self.sio.event
         def retry_sending(data):
@@ -721,15 +733,24 @@ class ChatClientGUI:
     def save_file_stream(self, filename):
         file_path = self.download_files[filename]['path']
         queue = self.download_files[filename]['queue']
+        computed_hash = self.download_files[filename]['computed_hash']
         
-        with open(file_path, "wb") as f:
-            while True:
-                chunk = queue.get()
-                if chunk is None:  # Poison pill
-                    break
-                decoded_chunk = base64.b64decode(chunk.encode())
-                f.write(decoded_chunk)
-        self.download_files.pop(filename)
+        try:
+            with open(file_path, "wb") as f:
+                while True:
+                    chunk = queue.get()
+                    if chunk is None:  # Poison pill
+                        break
+                    
+                    decoded_chunk = base64.b64decode(chunk.encode())
+                    
+                    f.write(decoded_chunk)
+                    computed_hash.update(decoded_chunk)
+        except Exception as e:
+            messagebox.showerror("Error", "Failed to write chunk when downloading.")
+            log_event("client", "save_file_stream_failed", f"Failed to write chunk when downloading {filename}: {e}")
+        finally:
+            self.download_files.pop(filename)
     
     def ask_download(self, filename):
         if messagebox.askyesno("Download", f"Do you want to download {filename}?"):
@@ -741,10 +762,13 @@ class ChatClientGUI:
                     save_path += extension  # auto-append if user forgot
                     
                 q = Queue()
+                hash_algo_download = hashlib.sha256()
+                
                 self.download_files[filename] = {
                     'queue': q,
                     'path': save_path,
-                    'thread': threading.Thread(target=self.save_file_stream, args=(filename,), daemon=True)
+                    'thread': threading.Thread(target=self.save_file_stream, args=(filename,), daemon=True),
+                    'computed_hash': hash_algo_download
                 }
                 
                 self.download_files[filename]['thread'].start()

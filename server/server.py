@@ -252,11 +252,11 @@ class ChatServer:
                     # Construct full path to the file
                     file_path = os.path.join(UPLOAD_FOLDER, filename)  # Replace UPLOAD_FOLDER with your actual directory variable
                     
-                    # # Delete the file if it exists
-                    # if os.path.exists(file_path):
-                    #     os.remove(file_path)
-                    #     print(f"[finish_upload] Deleted corrupt file: {file_path}")
-                    #     log_event("server", "delete_file_upload_failed", f"[finish_upload] Deleted corrupt file: {file_path}")
+                    # # Delete the failed file
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        print(f"[finish_upload] Deleted corrupt file: {file_path}")
+                        log_event("server", "delete_failed_upload_file", f"Deleted corrupt file: {file_path}")
                                     
                     self.sio.emit('retry_sending', {
                         'filename': filename,
@@ -289,13 +289,14 @@ class ChatServer:
                 print(f"[finish_upload] Failed to finalize file")
                 log_event("server", "finish_upload_failed", f"Failed to finalize file {filename}: {e}")
             finally:
-                self.upload_files.pop((sid, filename), None)
+                self.upload_files.pop((sid, filename, recipient), None)
                         
         # --- Request download file --- 
         @self.sio.event
         def download_request(sid, data):
             filename = data.get('filename', '')
             path = os.path.join(UPLOAD_FOLDER, filename)
+            hash_algo_download = hashlib.sha256()
             
             if not os.path.exists(path):
                 print(f"[download_request] File not found: {filename}")
@@ -311,12 +312,15 @@ class ChatServer:
                             chunk = file.read(CHUNK_SIZE)
                             if not chunk:
                                 break
+                            hash_algo_download.update(chunk)
+                            
                             encoded_data = base64.b64encode(chunk).decode()
                             self.sio.emit('incoming_file_chunk', {
                                     'chunk_data': encoded_data,
                                     'filename': filename}, 
                                     room=sid)
-                    self.sio.emit('finish_download', {'filename': filename}, room=sid)
+                            
+                    self.sio.emit('finish_download', {'filename': filename, 'hash_file': hash_algo_download.hexdigest()}, room=sid)
                 except Exception as e:
                     print(f"[send_chunks] Failed to send file: {e}")
                     log_event("server", "send_chunks_failed", f"Failed to send file {filename}: {e}")
