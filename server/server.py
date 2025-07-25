@@ -14,7 +14,7 @@ from logs.db_logger import log_event
 
 # File
 UPLOAD_FOLDER = "upload_files"
-CHUNK_SIZE = 65536 # 64KB 
+CHUNK_SIZE = 49152 # 48KB 
 os.makedirs(UPLOAD_FOLDER, exist_ok = True)
 
 class ChatServer:

@@ -28,7 +28,7 @@ public_key = load_rsa_public_key("public_key.pem")
 
 FONT = "Helvetica"
 SERVER_API_URL = "http://localhost:8080"
-CHUNK_SIZE = 65536 # 64KB
+CHUNK_SIZE = 49152 # 48KB
 
 is_connecting = False
 connection_failed = False
@@ -63,6 +63,7 @@ class ChatClientGUI:
         # set up file transfer
         self.download_files = {}
         self.progress_n_index = {}
+        self.upload_confirmation = {}
         
         self.login_screen()
         self.Window.mainloop()
@@ -198,6 +199,12 @@ class ChatClientGUI:
             sender = data.get("sender", "Unknown")
             
             if sender == self.username:
+                # Cancel success timer if it's still pending
+                if filename in self.upload_confirmation:
+                    self.root.after_cancel(self.upload_confirmation[filename])
+                    self.upload_confirmation.pop(filename, None)
+                
+                # Display the error
                 messagebox.showerror("Error", f"File upload to server failed for '{filename}'. Please try resending the file.")
                 self.error_upload(filename)
     
@@ -578,7 +585,7 @@ class ChatClientGUI:
                         else:
                             threading.Thread(target=self.send_file_w_progressbar, args=(filepath, recipient,), daemon=True).start()
                     else:
-                        messagebox.showwarning("Warning", "Please choose a file smaller than 25 MB.")
+                        messagebox.showwarning("Warning", "Please choose a file smaller than 20 MB.")
                 else:
                     messagebox.showwarning("Warning", "Inappropriate file type (not video, image, or audio)")
                     log_event("client", "select_file_error", f"Incorrect file type error: {extension}")
@@ -668,7 +675,6 @@ class ChatClientGUI:
         except Exception as e:
             print("Cannot display the upload error.")
             log_event("client", "error_upload_error", f"Cannot display the upload error for {filename}: {e}") 
-            
     
     def update_progress(self, filename, chunk_num, total_chunks):
         try:
@@ -683,24 +689,34 @@ class ChatClientGUI:
                 self.chat_box.config(state="normal")
                 
                 progressbar_pos = bar_info["index"]
+                
+                def finalize_upload():
+                    # Check if retry was already triggered
+                    if filename not in self.upload_confirmation:
+                        return  # already handled
 
-                try:
-                    bar_info["bar"].destroy() # Remove the progress bar
-                    self.chat_box.delete(progressbar_pos) # Delete window element
-                except Exception as e:
-                    print(f"Error {e}")
-                    log_event("client", "progress_bar_error", f"Error destroying progress bar for {filename}: {e}")
+                    try:
+                        bar_info["bar"].destroy() # Remove the progress bar
+                        self.chat_box.delete(progressbar_pos) # Delete window element
+                    except Exception as e:
+                        print(f"Error {e}")
+                        log_event("client", "progress_bar_error", f"Error destroying progress bar for {filename}: {e}")
+                    
+                    # Insert the download button
+                    download_button = tk.Button(self.chat_box, text = "⬇", command = lambda : self.ask_download(filename), 
+                                        bg="midnight blue", fg="white", relief="flat", width= 2, 
+                                        padx=0, pady=0, font=(FONT, 11))
+                    self.chat_box.window_create(progressbar_pos, window = download_button, pady=3)
+                    
+                    self.chat_box.config(state="disabled")
+                    self.chat_box.yview(tk.END)
+                    
+                    self.progress_n_index.pop(filename, None)
+                    self.upload_confirmation.pop(filename, None)
                 
-                # Insert the download button
-                download_button = tk.Button(self.chat_box, text = "⬇", command = lambda : self.ask_download(filename), 
-                                    bg="midnight blue", fg="white", relief="flat", width= 2, 
-                                    padx=0, pady=0, font=(FONT, 11))
-                self.chat_box.window_create(progressbar_pos, window = download_button, pady=3)
-                
-                self.chat_box.config(state="disabled")
-                self.chat_box.yview(tk.END)
-                
-                self.progress_n_index.pop(filename, None)
+                # Only check the first time progress reaches 100% -> only schedule once
+                if filename not in self.upload_confirmation:
+                    self.upload_confirmation[filename] = self.root.after(2000, finalize_upload) # Delay 2s to wait for 'retry_sending' signal from server
             else:
                 bar_info["bar"]["value"] = percent
             
@@ -770,8 +786,9 @@ class ChatClientGUI:
                     'thread': threading.Thread(target=self.save_file_stream, args=(filename,), daemon=True),
                     'computed_hash': hash_algo_download
                 }
-                
+
                 self.download_files[filename]['thread'].start()
+                
                 self.sio.emit('download_request', {'filename': filename})
     
     def receive_file(self, msg_type, sender, filename, timestamp):
