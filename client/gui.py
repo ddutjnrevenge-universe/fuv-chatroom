@@ -295,74 +295,88 @@ class ChatClientGUI:
         self.Window.grid_columnconfigure(2, weight=1)
 
         # Top layout
-        self.chat_label = tk.Label(self.Window, text="FUV Chatroom", bg="midnight blue", fg="white", font=("Arial", 20, "bold"))
+        self.chat_label = tk.Label(self.Window, text="FUV Chatroom", bg="midnight blue", fg="white", font=("Helvetica", 20, "bold"))
         self.chat_label.grid(row=0, column=0, columnspan=2, sticky="ew")
 
-        self.user_label = tk.Label(self.Window, text="You: " + self.username, font=("Arial", 10))
+        self.user_label = tk.Label(self.Window, text="You: " + self.username, font=("Helvetica", 14, "bold"))
         self.user_label.grid(row=3, column=2, sticky="e", padx=10)
         
-        self.active_label = tk.Label(self.Window, text="Active", bg="midnight blue", fg="white", font=("Arial", 16))
+        self.active_label = tk.Label(self.Window, text="Active", bg="midnight blue", fg="white", font=("Helvetica", 20, "bold"))
         self.active_label.grid(row=0, column=2, sticky="ew")
 
         # Chat box
-        # self.chat_box = scrolledtext.ScrolledText(self.Window, width=80, height=28, state="disabled", font=("Arial", 14))
         self.chat_box = scrolledtext.ScrolledText(
                         self.Window, 
                         width=80, 
                         height=28, 
                         state="disabled", 
-                        font=("Arial", 14)  
+                        font=("Helvetica", 14)  
                     )
         self.chat_box.grid(row=1, column=0, columnspan=2, padx=10, pady=5, sticky="nsew")
 
         # Active user list
-        self.user_list = tk.Listbox(self.Window, width=28, height=28, font=("Arial", 14))
+        self.user_list = tk.Listbox(self.Window, width=28, height=28, font=("Helvetica", 14))
         self.user_list.grid(row=1, column=2, padx=5, pady=5, sticky="nsew")
         self.user_list.bind("<<ListboxSelect>>", self.on_user_selected)
-
-        # Entry box
+        
+        # Entry box (use Text widget for wrapping)
         self.entry_var = tk.StringVar()
-        # self.entry_box = tk.Entry(self.Window, textvariable=self.entry_var, width=75, font=("Arial", 14))
-        self.entry_box = tk.Entry(
+        self.entry_box = tk.Text(
                         self.Window, 
-                        textvariable=self.entry_var, 
                         width=75, 
-                        font=("Arial", 14)  
+                        height=2, 
+                        font=("Helvetica", 14),
+                        wrap="word"
                     )
         self.entry_box.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
-        # Add this binding after creating the entry box
         self.entry_box.bind("<KeyRelease>", self.check_for_slash_command)
 
+        # Sync entry_var with Text widget
+        def sync_entry_var(event=None):
+            self.entry_var.set(self.entry_box.get("1.0", "end-1c"))
+            self.check_for_slash_command(event)
+        self.entry_box.bind("<KeyRelease>", sync_entry_var)
+        self.entry_box.bind("<FocusOut>", sync_entry_var)
+
         # Send button
-        self.send_btn = tk.Button(self.Window, text="➤", bg="DarkGoldenrod1", font=("Arial", 16), command=self.send_message)
+        def send_and_clear():
+            self.send_message()
+            self.entry_box.delete("1.0", tk.END)
+            self.entry_var.set("")
+        self.send_btn = tk.Button(self.Window, text="➤", bg="DarkGoldenrod1", font=("Helvetica", 16), command=send_and_clear)
         self.send_btn.grid(row=2, column=1, sticky="w")
 
-        # Bind Enter key to send message
-        self.entry_box.bind("<Return>", lambda event: self.send_message())
+        # Bind Enter key to send message (and prevent newline)
+        def send_and_prevent_newline(_):
+            self.send_message()
+            # Clear the entry box after sending
+            self.entry_box.delete("1.0", tk.END)
+            self.entry_var.set("")
+            return "break"
+        self.entry_box.bind("<Return>", send_and_prevent_newline)
 
         button_frame = tk.Frame(self.Window)
         button_frame.grid(row=3, column=0, columnspan=2, sticky="w", padx=10, pady=5)
 
         # File and Emoji Buttons - now inside the button frame
-        self.file_btn = tk.Button(button_frame, text="📎", font=("Arial", 16), command=self.select_file)
+        self.file_btn = tk.Button(button_frame, text="📎", font=("Helvetica", 16), command=self.select_file)
         self.file_btn.pack(side="left", padx=(0, 10))  # Right padding of 10
 
-        self.emoji_btn = tk.Button(button_frame, text="😊", font=("Arial", 16), command=self.show_emoji_picker)
+        self.emoji_btn = tk.Button(button_frame, text="😊", font=("Helvetica", 16), command=self.show_emoji_picker)
         self.emoji_btn.pack(side="left")
 
         # Suggestion label - moved to row 4 and spans both columns
         self.suggestion_label = tk.Label(
             self.Window,
             text="Tip: Type '/w [username] [message]' to send a private message \nType '/filew [username] [filepath]' to privately send a file",
-            # text="Tip: Type '/w [username] [message]' to send a private message \n Type '/pfilew [username] [file path]' to send a private file\nType '/gfilew [username] [file path]' to send a global file",
             fg="#2E86C1",
-            font=("Arial", 10, "italic")
+            font=("Helvetica", 10, "italic")
         )
         self.suggestion_label.grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 5))
         self.suggestion_label.grid_remove()
 
         # Exit protocol
-        self.Window.protocol("WM_DELETE_WINDOW", self.graceful_exit)   
+        self.Window.protocol("WM_DELETE_WINDOW", self.graceful_exit)
     
     def chatroom_screen(self):
         self.update_user_server()
@@ -438,7 +452,7 @@ class ChatClientGUI:
         # search_frame.pack(fill="x", padx=5, pady=5)
         
         # search_var = tk.StringVar()
-        # search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Arial", 12))
+        # search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Helvetica", 12))
         # search_entry.pack(side="left", fill="x", expand=True)
         
         # search_btn = tk.Button(search_frame, text="Search", command=lambda: self.search_emojis(search_var.get()))
@@ -448,10 +462,12 @@ class ChatClientGUI:
         search_frame.pack(fill="x", padx=5, pady=5)
 
         search_var = tk.StringVar()
-        search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Arial", 12))
+        search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Helvetica", 12))
         search_entry.pack(side="left", fill="x", expand=True)
 
         search_btn = tk.Button(search_frame, text="Search", command=lambda: self.search_emojis(search_var.get()))
+        # hit enter to search besides clicking the button
+        search_entry.bind("<Return>", lambda event: self.search_emojis(search_var.get()))
         search_btn.pack(side="right", padx=5)
 
     def populate_emoji_tab(self, tab, emojis):
@@ -462,7 +478,7 @@ class ChatClientGUI:
         
         scrollable_frame.bind(
             "<Configure>",
-            lambda e: canvas.configure(
+            lambda _: canvas.configure(
                 scrollregion=canvas.bbox("all")
             )
         )
@@ -478,7 +494,7 @@ class ChatClientGUI:
             btn = tk.Button(
                 scrollable_frame, 
                 text=emoji, 
-                font=("Arial", 16), 
+                font=("Helvetica", 16), 
                 command=lambda e=emoji: self.insert_emoji(e),
                 width=3,
                 relief="flat"
@@ -520,12 +536,12 @@ class ChatClientGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        for i, (code, emoji) in enumerate(matches):
+        for code, emoji in matches:
             frame = tk.Frame(scrollable_frame)
             frame.pack(fill="x", padx=5, pady=2)
             
-            tk.Label(frame, text=emoji, font=("Arial", 16)).pack(side="left")
-            tk.Label(frame, text=code, font=("Arial", 12)).pack(side="left", padx=10)
+            tk.Label(frame, text=emoji, font=("Helvetica", 16)).pack(side="left")
+            tk.Label(frame, text=code, font=("Helvetica", 12)).pack(side="left", padx=10)
             
             btn = tk.Button(
                 frame, 
@@ -536,27 +552,21 @@ class ChatClientGUI:
             btn.pack(side="right")
 
     def insert_emoji(self, emoji):
-        """Insert the selected emoji into the message input with correct cursor position"""
+        """Insert the selected emoji into the message input at the current cursor position (Unicode-safe)"""
         try:
-            current_pos = self.entry_box.index(tk.INSERT)
-            current_text = self.entry_var.get()
-            
-            # Insert emoji at current cursor position
-            new_text = current_text[:current_pos] + emoji + current_text[current_pos:]
-            self.entry_var.set(new_text)
-            
-            # Move cursor to position after the emoji
-            # Note: Some emojis are 2 characters long in Python's string representation
-            cursor_increment = len(emoji.encode('utf-16-le')) // 2
-            self.entry_box.icursor(current_pos + cursor_increment)
-            self.entry_box.focus()
-            
+            # Insert emoji at the current cursor position in the Text widget
+            self.entry_box.insert(tk.INSERT, emoji)
+            # Update entry_var to reflect the new text
+            self.entry_var.set(self.entry_box.get("1.0", "end-1c"))
+            # Move cursor after the inserted emoji
+            self.entry_box.mark_set(tk.INSERT, self.entry_box.index(tk.INSERT))
+            self.entry_box.focus_set()
+
             # Close the emoji picker if open
-            if self.emoji_window and self.emoji_window.winfo_exists():
-                self.entry_box.focus_set()
+            if hasattr(self, 'emoji_window') and self.emoji_window and self.emoji_window.winfo_exists():
                 self.emoji_window.destroy()
                 self.emoji_window = None
-                
+
         except Exception as e:
             print(f"Error inserting emoji: {e}")
             log_event("client", "insert_emoji_error", f"Error inserting emoji: {e}")
@@ -737,7 +747,7 @@ class ChatClientGUI:
         progressbar_pos = self.chat_box.index(bar)      
         self.chat_box.insert(tk.END, "\n")
         
-        self.chat_box.tag_config("blue", foreground="blue")
+        self.chat_box.tag_config("blue", foreground="midnight blue")
         self.chat_box.tag_config("orange", foreground="darkorange")
         
         # Store the position of the progress bar for later replacing with the download button
@@ -803,7 +813,7 @@ class ChatClientGUI:
         self.chat_box.window_create(tk.END, window = download_button, pady=3)
         self.chat_box.insert(tk.END, "\n")
         
-        self.chat_box.tag_config("blue", foreground="blue")
+        self.chat_box.tag_config("blue", foreground="midnight blue")
         self.chat_box.tag_config("orange", foreground="darkorange")
         self.chat_box.config(state="disabled")
         self.chat_box.yview(tk.END)
@@ -873,9 +883,12 @@ class ChatClientGUI:
     def display_message(self, msg_type, sender, message, timestamp):
         self.chat_box.config(state="normal")
         tag = "blue" if msg_type == "Global" else "orange"
-        formatted = f"({msg_type}) ({sender}) ({timestamp}): {message}\n"
-        self.chat_box.insert(tk.END, formatted, tag)
-        self.chat_box.tag_config("blue", foreground="blue")
+        # Insert colored metadata
+        metadata = f"({msg_type}) ({sender}) ({timestamp}): "
+        self.chat_box.insert(tk.END, metadata, tag)
+        # Insert message content in default color (black)
+        self.chat_box.insert(tk.END, f"{message}\n")
+        self.chat_box.tag_config("blue", foreground="#0229A7")
         self.chat_box.tag_config("orange", foreground="darkorange")
         self.chat_box.config(state="disabled")
         self.chat_box.yview(tk.END)
@@ -915,20 +928,12 @@ class ChatClientGUI:
             
             if file_path:
                 self.select_file(file_path, recipient)
-                clear_n_exit()
+                self.clear_n_exit()
         
         def pmessage():
-            clear_n_exit()
-        
-            text = f"/w {recipient} "
-            self.entry_var.set(text)
-            self.check_for_slash_command(None)
-            
-            current_pos = self.entry_box.index(tk.INSERT)
-            cursor_increment = len(text)
-            self.entry_box.icursor(current_pos + cursor_increment)
-            self.entry_box.focus()
-        
+            # Call pmessage method from the class
+            self.pmessage(recipient)
+
         def clear_n_exit():
             self.private_box.destroy()
             self.user_list.selection_clear(0, tk.END)
@@ -946,6 +951,32 @@ class ChatClientGUI:
         
         # Exit
         self.private_box.protocol("WM_DELETE_WINDOW", clear_n_exit)
+
+    def pmessage(self, recipient):
+        # Clear any existing private message box
+        self.clear_n_exit()
+
+        # Set the text for the message box
+        text = f"/w {recipient} "
+        self.entry_var.set(text)  # Update the entry_var to reflect the new text in the entry box
+        self.entry_box.delete(1.0, tk.END)  # Clear the current text in the entry box
+        self.entry_box.insert(tk.END, text)  # Insert the text into the entry box
+        self.check_for_slash_command(None)  # Handle slash command suggestions
+
+        # Set the cursor position after the inserted text
+        self.entry_box.mark_set(tk.INSERT, tk.END)  # Place the cursor at the end of the text
+
+        # Focus the entry box to allow further typing
+        self.entry_box.focus()
+
+
+    def clear_n_exit(self):
+        """Exit the private message window and reset the user list"""
+        self.private_box.destroy()
+        self.user_list.selection_clear(0, tk.END)
+        self.user_list.activate(-1)  # Remove active item
+        self.user_list.selection_anchor(0)  # Reset anchor
+
     
     # Event handler for user selection in the user list
     def on_user_selected(self, event):

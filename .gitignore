@@ -4,4 +4,3 @@
 server/*.pem
 client/*.pem
 server/upload_files/*
-logs/chat_logs.db
