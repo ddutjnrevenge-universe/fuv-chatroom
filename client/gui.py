@@ -26,7 +26,7 @@ from server.crypto_utils import (
 # Load server private key
 public_key = load_rsa_public_key("public_key.pem")
 
-FONT = "Helvetica"
+FONT = "Georgia"
 SERVER_API_URL = "http://localhost:8080"
 CHUNK_SIZE = 49152 # 48KB
 
@@ -295,13 +295,13 @@ class ChatClientGUI:
         self.Window.grid_columnconfigure(2, weight=1)
 
         # Top layout
-        self.chat_label = tk.Label(self.Window, text="FUV Chatroom", bg="midnight blue", fg="white", font=("Helvetica", 20, "bold"))
+        self.chat_label = tk.Label(self.Window, text="FUV Chatroom", bg="midnight blue", fg="white", font=("Georgia", 20, "bold"))
         self.chat_label.grid(row=0, column=0, columnspan=2, sticky="ew")
 
-        self.user_label = tk.Label(self.Window, text="You: " + self.username, font=("Helvetica", 14, "bold"))
+        self.user_label = tk.Label(self.Window, text="You: " + self.username, font=("Georgia", 14, "bold"))
         self.user_label.grid(row=3, column=2, sticky="e", padx=10)
         
-        self.active_label = tk.Label(self.Window, text="Active", bg="midnight blue", fg="white", font=("Helvetica", 20, "bold"))
+        self.active_label = tk.Label(self.Window, text="Active", bg="midnight blue", fg="white", font=("Georgia", 20, "bold"))
         self.active_label.grid(row=0, column=2, sticky="ew")
 
         # Chat box
@@ -310,12 +310,12 @@ class ChatClientGUI:
                         width=80, 
                         height=28, 
                         state="disabled", 
-                        font=("Helvetica", 14)  
+                        font=("Georgia", 14)  
                     )
         self.chat_box.grid(row=1, column=0, columnspan=2, padx=10, pady=5, sticky="nsew")
 
         # Active user list
-        self.user_list = tk.Listbox(self.Window, width=28, height=28, font=("Helvetica", 14))
+        self.user_list = tk.Listbox(self.Window, width=28, height=28, font=("Georgia", 14))
         self.user_list.grid(row=1, column=2, padx=5, pady=5, sticky="nsew")
         self.user_list.bind("<<ListboxSelect>>", self.on_user_selected)
         
@@ -325,7 +325,7 @@ class ChatClientGUI:
                         self.Window, 
                         width=75, 
                         height=2, 
-                        font=("Helvetica", 14),
+                        font=("Georgia", 14),
                         wrap="word"
                     )
         self.entry_box.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
@@ -343,7 +343,7 @@ class ChatClientGUI:
             self.send_message()
             self.entry_box.delete("1.0", tk.END)
             self.entry_var.set("")
-        self.send_btn = tk.Button(self.Window, text="➤", bg="DarkGoldenrod1", font=("Helvetica", 16), command=send_and_clear)
+        self.send_btn = tk.Button(self.Window, text="➤", bg="DarkGoldenrod1", font=("Georgia", 16), command=send_and_clear)
         self.send_btn.grid(row=2, column=1, sticky="w")
 
         # Bind Enter key to send message (and prevent newline)
@@ -359,10 +359,10 @@ class ChatClientGUI:
         button_frame.grid(row=3, column=0, columnspan=2, sticky="w", padx=10, pady=5)
 
         # File and Emoji Buttons - now inside the button frame
-        self.file_btn = tk.Button(button_frame, text="📎", font=("Helvetica", 16), command=self.select_file)
+        self.file_btn = tk.Button(button_frame, text="📎", font=("Georgia", 16), command=self.select_file)
         self.file_btn.pack(side="left", padx=(0, 10))  # Right padding of 10
 
-        self.emoji_btn = tk.Button(button_frame, text="😊", font=("Helvetica", 16), command=self.show_emoji_picker)
+        self.emoji_btn = tk.Button(button_frame, text="😊", font=("Georgia", 16), command=self.show_emoji_picker)
         self.emoji_btn.pack(side="left")
 
         # Suggestion label - moved to row 4 and spans both columns
@@ -370,7 +370,7 @@ class ChatClientGUI:
             self.Window,
             text="Tip: Type '/w [username] [message]' to send a private message \nType '/filew [username] [filepath]' to privately send a file",
             fg="#2E86C1",
-            font=("Helvetica", 10, "italic")
+            font=("Georgia", 10, "italic")
         )
         self.suggestion_label.grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 5))
         self.suggestion_label.grid_remove()
@@ -452,7 +452,7 @@ class ChatClientGUI:
         # search_frame.pack(fill="x", padx=5, pady=5)
         
         # search_var = tk.StringVar()
-        # search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Helvetica", 12))
+        # search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Georgia", 12))
         # search_entry.pack(side="left", fill="x", expand=True)
         
         # search_btn = tk.Button(search_frame, text="Search", command=lambda: self.search_emojis(search_var.get()))
@@ -462,7 +462,7 @@ class ChatClientGUI:
         search_frame.pack(fill="x", padx=5, pady=5)
 
         search_var = tk.StringVar()
-        search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Helvetica", 12))
+        search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Georgia", 12))
         search_entry.pack(side="left", fill="x", expand=True)
 
         search_btn = tk.Button(search_frame, text="Search", command=lambda: self.search_emojis(search_var.get()))
@@ -494,7 +494,7 @@ class ChatClientGUI:
             btn = tk.Button(
                 scrollable_frame, 
                 text=emoji, 
-                font=("Helvetica", 16), 
+                font=("Georgia", 16), 
                 command=lambda e=emoji: self.insert_emoji(e),
                 width=3,
                 relief="flat"
@@ -540,8 +540,8 @@ class ChatClientGUI:
             frame = tk.Frame(scrollable_frame)
             frame.pack(fill="x", padx=5, pady=2)
             
-            tk.Label(frame, text=emoji, font=("Helvetica", 16)).pack(side="left")
-            tk.Label(frame, text=code, font=("Helvetica", 12)).pack(side="left", padx=10)
+            tk.Label(frame, text=emoji, font=("Georgia", 16)).pack(side="left")
+            tk.Label(frame, text=code, font=("Georgia", 12)).pack(side="left", padx=10)
             
             btn = tk.Button(
                 frame, 
@@ -1002,7 +1002,7 @@ class ChatClientGUI:
         # Clear the current list
         self.user_list.delete(0, tk.END)
         for user in users:
-            self.user_list.insert(tk.END, f"● {user}")
+            self.user_list.insert(tk.END, f"👤 {user}")
 
     def graceful_exit(self):
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
