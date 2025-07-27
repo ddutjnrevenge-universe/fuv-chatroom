@@ -241,6 +241,12 @@ class ChatClientGUI:
         elif len(username) > 9:
             messagebox.showwarning("Warning", "Username is too long. Please use a shorter username.")
             return False
+        elif username.count(" ") > 0:
+            messagebox.showwarning("Warning", "Username cannot contain spaces. Please choose another one.")
+            return False
+        elif not username.isalnum():
+            messagebox.showwarning("Warning", "Username cannot contain special characters. Please choose another one.")
+            return False
         elif username in self.active_users:
             messagebox.showwarning("Warning", "This username is already taken. Please choose another one.")
             return False
