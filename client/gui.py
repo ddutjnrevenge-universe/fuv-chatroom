@@ -257,27 +257,45 @@ class ChatClientGUI:
         return True
 
     def setup_login_screen(self):
-        self.login = tk.Toplevel()
-        setup_window(self.login, "FUV Chatroom Login", 600, 400)
+        self.login = tk.Toplevel(bg="midnight blue")
+        setup_window(self.login, "FUV Chatroom Login", 680, 230)
         
-        # Use Grid Layout later if typing the password
-        self.text = tk.Label(self.login, text = "Login", font = (FONT, 20, "bold"))
-        self.text.place(relx=0.5, rely=0.2, anchor="center")
+        # Initialize frames
+        content_frame = tk.Frame(self.login, bg="midnight blue")
+        content_frame.place(relx=0.5, rely=0.45, anchor="center")
         
-        self.username = tk.Label(self.login, text = "Username:", font = (FONT, 14, "bold"))
-        self.username.place(relx=0.15, rely=0.3)
+        left_frame = tk.Frame(content_frame, bg="midnight blue")
+        left_frame.grid(row=0, column=0, padx=(0, 25), sticky="e")
+
+        right_frame = tk.Frame(content_frame, bg="midnight blue")
+        right_frame.grid(row=0, column=1, sticky="w")
         
-        self.entry_username = tk.Entry(self.login, font = (FONT, 14))
-        self.entry_username.place(relwidth=0.45, relheight=0.08, relx=0.35, rely=0.294)
+        # Left side: Title
+        title_text1 = tk.Label(left_frame, text="Welcome to", font=(FONT, 24), fg="white", bg="midnight blue")
+        title_text1.pack(anchor="w")
         
-        # Can push button to go next
-        self.button = tk.Button(self.login, text = "→", font=(FONT, 14),
-                                command = lambda : self.validate_username(self.entry_username.get()))
-        self.button.place(relx=0.5, rely=0.5, anchor="center")
+        title_text2 = tk.Label(left_frame, text="FUV CHATROOM", font=(FONT, 24, "bold"), fg="DarkGoldenrod1", bg="midnight blue")
+        title_text2.pack(anchor="w")
+        
+        # Username row
+        username_text = tk.Label(right_frame, text="Username:", font=(FONT, 13), fg="white", bg="midnight blue")
+        username_text.grid(row=0, column=0, sticky="e", padx=(0, 5))
+        
+        self.entry_username = tk.Entry(right_frame, font=(FONT, 13), width=12)
+        self.entry_username.grid(row=0, column=1)
+        
+        
+        # Arrow button (">")
+        self.button = tk.Button(content_frame, text=">", font=(FONT, 9, "bold"), width=2, bg="DarkGoldenrod1", fg="midnight blue",
+                                command=lambda: self.validate_username(self.entry_username.get()))
+        self.button.grid(row=0, column=2, padx=(10, 0))
+        
+        # Set focus
+        self.entry_username.focus_set()
         
         # Can enter to go next
         self.entry_username.bind("<Return>", lambda event: self.validate_username(self.entry_username.get()))
-        
+
         # Exit
         self.login.protocol("WM_DELETE_WINDOW", self.graceful_exit)
 
@@ -285,6 +303,7 @@ class ChatClientGUI:
         self.connect_to_server()
         print("Connecting to server...")
         log_event("client", "login_screen", "Attempting to connect to server...")
+        
         while (not self.sio.connected):
             continue
 
@@ -301,13 +320,13 @@ class ChatClientGUI:
         self.Window.grid_columnconfigure(2, weight=1)
 
         # Top layout
-        self.chat_label = tk.Label(self.Window, text="FUV Chatroom", bg="midnight blue", fg="white", font=("Georgia", 20, "bold"))
+        self.chat_label = tk.Label(self.Window, text="FUV Chatroom", bg="midnight blue", fg="white", font=(FONT, 20, "bold"))
         self.chat_label.grid(row=0, column=0, columnspan=2, sticky="ew")
 
-        self.user_label = tk.Label(self.Window, text="You: " + self.username, font=("Georgia", 14, "bold"))
+        self.user_label = tk.Label(self.Window, text="You: " + self.username, font=(FONT, 14, "bold"))
         self.user_label.grid(row=3, column=2, sticky="e", padx=10)
         
-        self.active_label = tk.Label(self.Window, text="Active", bg="midnight blue", fg="white", font=("Georgia", 20, "bold"))
+        self.active_label = tk.Label(self.Window, text="Active", bg="midnight blue", fg="white", font=(FONT, 20, "bold"))
         self.active_label.grid(row=0, column=2, sticky="ew")
 
         # Chat box
@@ -316,12 +335,13 @@ class ChatClientGUI:
                         width=80, 
                         height=28, 
                         state="disabled", 
-                        font=("Georgia", 14)  
+                        font=(FONT, 14)  
                     )
         self.chat_box.grid(row=1, column=0, columnspan=2, padx=10, pady=5, sticky="nsew")
 
         # Active user list
-        self.user_list = tk.Listbox(self.Window, width=28, height=28, font=("Georgia", 14))
+        self.user_list = tk.Listbox(self.Window, width=28, height=28, font=(FONT, 14), 
+                                    selectbackground="light blue", selectforeground="midnight blue")
         self.user_list.grid(row=1, column=2, padx=5, pady=5, sticky="nsew")
         self.user_list.bind("<<ListboxSelect>>", self.on_user_selected)
         
@@ -331,7 +351,7 @@ class ChatClientGUI:
                         self.Window, 
                         width=75, 
                         height=2, 
-                        font=("Georgia", 14),
+                        font=(FONT, 14),
                         wrap="word"
                     )
         self.entry_box.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
@@ -349,7 +369,7 @@ class ChatClientGUI:
             self.send_message()
             self.entry_box.delete("1.0", tk.END)
             self.entry_var.set("")
-        self.send_btn = tk.Button(self.Window, text="➤", bg="DarkGoldenrod1", font=("Georgia", 16), command=send_and_clear)
+        self.send_btn = tk.Button(self.Window, text="➤", bg="DarkGoldenrod1", font=(FONT, 16), command=send_and_clear)
         self.send_btn.grid(row=2, column=1, sticky="w")
 
         # Bind Enter key to send message (and prevent newline)
@@ -365,10 +385,10 @@ class ChatClientGUI:
         button_frame.grid(row=3, column=0, columnspan=2, sticky="w", padx=10, pady=5)
 
         # File and Emoji Buttons - now inside the button frame
-        self.file_btn = tk.Button(button_frame, text="📎", font=("Georgia", 16), command=self.select_file)
+        self.file_btn = tk.Button(button_frame, text="📎", font=(FONT, 16), command=self.select_file)
         self.file_btn.pack(side="left", padx=(0, 10))  # Right padding of 10
 
-        self.emoji_btn = tk.Button(button_frame, text="😊", font=("Georgia", 16), command=self.show_emoji_picker)
+        self.emoji_btn = tk.Button(button_frame, text="😊", font=(FONT, 16), command=self.show_emoji_picker)
         self.emoji_btn.pack(side="left")
 
         # Suggestion label - moved to row 4 and spans both columns
@@ -376,7 +396,7 @@ class ChatClientGUI:
             self.Window,
             text="Tip: Type '/w [username] [message]' to send a private message \nType '/filew [username] [filepath]' to privately send a file",
             fg="#2E86C1",
-            font=("Georgia", 10, "italic")
+            font=(FONT, 10, "italic")
         )
         self.suggestion_label.grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 5))
         self.suggestion_label.grid_remove()
@@ -458,7 +478,7 @@ class ChatClientGUI:
         # search_frame.pack(fill="x", padx=5, pady=5)
         
         # search_var = tk.StringVar()
-        # search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Georgia", 12))
+        # search_entry = tk.Entry(search_frame, textvariable=search_var, font=(FONT, 12))
         # search_entry.pack(side="left", fill="x", expand=True)
         
         # search_btn = tk.Button(search_frame, text="Search", command=lambda: self.search_emojis(search_var.get()))
@@ -468,7 +488,7 @@ class ChatClientGUI:
         search_frame.pack(fill="x", padx=5, pady=5)
 
         search_var = tk.StringVar()
-        search_entry = tk.Entry(search_frame, textvariable=search_var, font=("Georgia", 12))
+        search_entry = tk.Entry(search_frame, textvariable=search_var, font=(FONT, 12))
         search_entry.pack(side="left", fill="x", expand=True)
 
         search_btn = tk.Button(search_frame, text="Search", command=lambda: self.search_emojis(search_var.get()))
@@ -500,7 +520,7 @@ class ChatClientGUI:
             btn = tk.Button(
                 scrollable_frame, 
                 text=emoji, 
-                font=("Georgia", 16), 
+                font=(FONT, 16), 
                 command=lambda e=emoji: self.insert_emoji(e),
                 width=3,
                 relief="flat"
@@ -546,8 +566,8 @@ class ChatClientGUI:
             frame = tk.Frame(scrollable_frame)
             frame.pack(fill="x", padx=5, pady=2)
             
-            tk.Label(frame, text=emoji, font=("Georgia", 16)).pack(side="left")
-            tk.Label(frame, text=code, font=("Georgia", 12)).pack(side="left", padx=10)
+            tk.Label(frame, text=emoji, font=(FONT, 16)).pack(side="left")
+            tk.Label(frame, text=code, font=(FONT, 12)).pack(side="left", padx=10)
             
             btn = tk.Button(
                 frame, 
@@ -925,8 +945,8 @@ class ChatClientGUI:
         self.private_box.columnconfigure(0, weight=1)
         
         # Add label
-        self.question = tk.Label(self.private_box, text=f"Sending to {recipient}", font=(FONT, 14))
-        self.question.grid(row=0, column=0, pady = 10)
+        self.question = tk.Label(self.private_box, text=f"Sending to {recipient}", font=(FONT, 14, "bold"))
+        self.question.grid(row=0, column=0, pady = (15, 0))
 
         # Button commands
         def pfile():
@@ -949,10 +969,12 @@ class ChatClientGUI:
         self.button_frame = tk.Frame(self.private_box)
         self.button_frame.grid(row=1, column=0, pady=(5, 10))
         
-        self.private_file = tk.Button(self.button_frame, text="File", width=10, command=pfile)
+        self.private_file = tk.Button(self.button_frame, text="File", font=(FONT, 10), width=10, 
+                                      bg= "light blue", fg="midnight blue", command=pfile)
         self.private_file.grid(row=0, column=0, padx=5)
         
-        self.private_message = tk.Button(self.button_frame, text="Message", width=10, command=pmessage)
+        self.private_message = tk.Button(self.button_frame, text="Message", font=(FONT, 10), width=10, 
+                                         bg= "light blue", fg="midnight blue", command=pmessage)
         self.private_message.grid(row=0, column=1, padx=5)
         
         # Exit
@@ -960,7 +982,10 @@ class ChatClientGUI:
 
     def pmessage(self, recipient):
         # Clear any existing private message box
-        self.clear_n_exit()
+        self.private_box.destroy()
+        self.user_list.selection_clear(0, tk.END)
+        self.user_list.activate(-1)  # Remove active item
+        self.user_list.selection_anchor(0)  # Reset anchor
 
         # Set the text for the message box
         text = f"/w {recipient} "
@@ -973,16 +998,7 @@ class ChatClientGUI:
         self.entry_box.mark_set(tk.INSERT, tk.END)  # Place the cursor at the end of the text
 
         # Focus the entry box to allow further typing
-        self.entry_box.focus()
-
-
-    def clear_n_exit(self):
-        """Exit the private message window and reset the user list"""
-        self.private_box.destroy()
-        self.user_list.selection_clear(0, tk.END)
-        self.user_list.activate(-1)  # Remove active item
-        self.user_list.selection_anchor(0)  # Reset anchor
-
+        self.entry_box.focus()  
     
     # Event handler for user selection in the user list
     def on_user_selected(self, event):
