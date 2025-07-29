@@ -880,6 +880,10 @@ class ChatClientGUI:
                 message_content = parts[2]  
                 plaintext = f"{timestamp}|{message_content}" 
                 # encrypted_msg = encrypt_message(plaintext)
+                # --- CHECK IF RECIPIENT IS IN ACTIVE USERS ---
+                if recipient not in self.active_users:
+                    messagebox.showwarning("Warning", f"User '{recipient}' does not exist or is not active.")
+                    return
                 encrypted_msg = encrypt_aes(self.session_aes_key, plaintext)
 
                 self.sio.emit('private_message', {
