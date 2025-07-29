@@ -7,8 +7,6 @@ A secure, multi-user real-time chatroom application built with Python, featuring
 ---
 
 ## Table of Contents
-## Table of Contents
-
 1. 🌟 [Features & Functional Requirements](#features--functional-requirements)
 2. 🏗️ [Architecture Overview](#architecture-overview)
 3. 💾 [Installation](#installation)
@@ -19,7 +17,7 @@ A secure, multi-user real-time chatroom application built with Python, featuring
 
 ---
 
-## 🌟 Features & Functional Requirements
+## Features & Functional Requirements
 
 The application delivers all essential capabilities for a secure, modern chatroom:
 
@@ -87,7 +85,7 @@ The application delivers all essential capabilities for a secure, modern chatroo
 
 ---
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
 - **Client:**  
   Python Tkinter GUI application (`CLIENT/gui.py`). Handles all user interaction, sends/receives messages and files, and manages encryption/decryption.
@@ -100,7 +98,7 @@ The application delivers all essential capabilities for a secure, modern chatroo
 - **Emoji System:**  
   Shortcode-to-Unicode mapping (`CLIENT/emoji_dict.py`) and a visual emoji picker in the client GUI.
 
-### 📂 Project Structure
+### Project Structure
 ```
 FUV-CHATROOM/
 ├── CLIENT/
@@ -120,7 +118,7 @@ FUV-CHATROOM/
 ├── requirements.txt
 ├── rsa_key_generator.py  
 ```
-### 🖇️ Component Diagram 
+### Component Diagram 
 ```mermaid
 flowchart LR
     %% CLIENT SIDE
@@ -131,7 +129,7 @@ flowchart LR
     end
 
     %% SERVER SIDE
-    subgraph Server["Server (Flask + Flask-SocketIO)"]
+    subgraph Server["Server (Flask)"]
         SrvSocket["Socket.IO Event Manager<br/>(event routes, broadcast, emit)"]
         SrvCrypto["Cryptographic Module<br/>(server, crypto_utils.py)<br/>RSA Decrypt (private_key.pem), AES-256"]
         SrvSession["Session/User Manager<br/>(active users, sid, AES session keys)"]
