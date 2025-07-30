@@ -300,7 +300,7 @@ flowchart LR
 
 ---
 
-## 💾 Installation
+## Installation
 
 ### 1. Clone the Repository
 ```bash
@@ -363,7 +363,7 @@ To simulate a real chat, keep at least two terminals open:
   - One or more for clients (python gui.py in each)
 >If you encounter any issues, ensure your keys are correctly placed and that all dependencies are installed.
 ---
-## 💬 Usage
+## Usage
 
 - **Login:** Enter a unique username (duplicate names are rejected).
 - **Send public messages:** Type in the message box and press Enter.
@@ -375,7 +375,7 @@ To simulate a real chat, keep at least two terminals open:
 
 ---
 
-## ⚖️Strengths & Limitations
+## Strengths & Limitations
 
 ### Strengths
 
@@ -393,7 +393,7 @@ To simulate a real chat, keep at least two terminals open:
 
 ---
 
-## 🔮 Future Work
+## Future Work
 
 - Refactor to support async/multi-process/concurrent models for higher scalability.
 - Transition to cloud hosting for broader accessibility.
@@ -403,7 +403,7 @@ To simulate a real chat, keep at least two terminals open:
 
 ---
 
-## 🎓 Acknowledgements & References
+## Acknowledgements & References
 
 This project was developed as part of the Independent Study in Computer Networks at FUV - Summer 2025, which is built on the foundations laid by Kurose & Ross's *Computer Networking: A Top-Down Approach*. We want to say a special thanks to Professor Dang Huynh for his guidance and support throughout the project.
 
