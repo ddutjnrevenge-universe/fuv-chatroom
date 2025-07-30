@@ -2,8 +2,6 @@
 
 A secure, multi-user real-time chatroom application built with Python, featuring robust encryption, public/private messaging, file sharing, emoji support, and a modern GUI.
 
-> **For technical diagrams, test cases, and further details, see the [project report](#).**
-
 ---
 
 ## Table of Contents
